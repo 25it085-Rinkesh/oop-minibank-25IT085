@@ -61,5 +61,32 @@ public class MiniBank {
         } while (choice != 5);
 
         sc.close();
+
+        Account[] accounts = {
+                new Account("Rinkesh", 1000),
+                new Account("Customer2"),
+                new Account("Customer3", 5000)
+        };
+
+        accounts[0].deposit(500);
+        accounts[0].withdraw(200);
+
+        accounts[1].deposit(2000);
+        accounts[1].withdraw(750);
+
+        accounts[2].deposit(1000);
+        accounts[2].withdraw(2500);
+
+        System.out.println("\n===== ACCOUNT BALANCES =====");
+
+        for (Account account : accounts) {
+            System.out.println(
+                    account.getAccountNumber()
+                            + " | "
+                            + account.getOwnerName()
+                            + " | Balance: ₹"
+                            + account.getBalance()
+            );
+        }
     }
 }
