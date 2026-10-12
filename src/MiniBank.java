@@ -14,7 +14,7 @@ public class MiniBank {
 
         Scanner sc = new Scanner(System.in);
 
-        int choice;
+        int choice = -1;
 
         do {
             System.out.println("\n========== MENU ==========");
@@ -24,6 +24,15 @@ public class MiniBank {
             System.out.println("4. Transfer");
             System.out.println("5. Exit");
             System.out.print("Enter your choice: ");
+
+            if (!sc.hasNextInt()) {
+                if (!sc.hasNext()) {
+                    break;
+                }
+                sc.next();
+                System.out.println("Invalid input! Please enter a number from 1 to 5.");
+                continue;
+            }
 
             choice = sc.nextInt();
 
@@ -41,22 +50,15 @@ public class MiniBank {
                 continue;
             }
 
-            switch (option) {
-                case OPEN_ACCOUNT ->
-                        System.out.println("Open Account - To be implemented in a later lab.");
+            String message = switch (option) {
+                case OPEN_ACCOUNT -> "Open Account - To be implemented in a later lab.";
+                case DEPOSIT -> "Deposit - To be implemented in a later lab.";
+                case WITHDRAW -> "Withdraw - To be implemented in a later lab.";
+                case TRANSFER -> "Transfer - To be implemented in a later lab.";
+                case EXIT -> "Thank you for using MiniBank. Goodbye!";
+            };
 
-                case DEPOSIT ->
-                        System.out.println("Deposit - To be implemented in a later lab.");
-
-                case WITHDRAW ->
-                        System.out.println("Withdraw - To be implemented in a later lab.");
-
-                case TRANSFER ->
-                        System.out.println("Transfer - To be implemented in a later lab.");
-
-                case EXIT ->
-                        System.out.println("Thank you for using MiniBank. Goodbye!");
-            }
+            System.out.println(message);
 
         } while (choice != 5);
 
@@ -77,16 +79,50 @@ public class MiniBank {
         accounts[2].deposit(1000);
         accounts[2].withdraw(2500);
 
-        System.out.println("\n===== ACCOUNT BALANCES =====");
-
-        for (Account account : accounts) {
-            System.out.println(
-                    account.getAccountNumber()
-                            + " | "
-                            + account.getOwnerName()
-                            + " | Balance: ₹"
-                            + account.getBalance()
-            );
+        long overdraftAmount = 5000;
+        System.out.println("\nAttempting to withdraw ₹" + overdraftAmount + " from " + accounts[0].getOwnerName() + "'s account (Current Balance: ₹" + accounts[0].getBalance() + ")...");
+        boolean withdrawSuccess = accounts[0].withdraw(overdraftAmount);
+        System.out.println("Withdrawal successful: " + withdrawSuccess);
+        if (!withdrawSuccess) {
+            System.out.println("Transaction rejected: Insufficient funds. Balance remains: ₹" + accounts[0].getBalance());
         }
+
+        System.out.println("\n===== ACCOUNT DETAILS (toString()) =====");
+        for (Account account : accounts) {
+            System.out.println(account.toString());
+        }
+
+        System.out.println("\n===== ACCOUNT EQUALITY (equals() & hashCode()) =====");
+        System.out.println("Comparing accounts[0] with accounts[1]: " + accounts[0].equals(accounts[1]));
+        System.out.println("Comparing accounts[0] with itself:        " + accounts[0].equals(accounts[0]));
+        System.out.println("accounts[0] hashCode: " + accounts[0].hashCode());
+        System.out.println("accounts[1] hashCode: " + accounts[1].hashCode());
+
+        System.out.println("\n===== TYPE CHECKING (instanceof) =====");
+        Object obj = accounts[0];
+        System.out.println("obj (referencing Account) instanceof Account:  " + (obj instanceof Account));
+        System.out.println("accounts[0] instanceof Object:                 " + (accounts[0] instanceof Object));
+
+        System.out.println("\n===== CUSTOMER, ADDRESS & CLONING =====");
+        Customer.Address address = new Customer.Address("123 Main Road", "Navsari", "396445");
+        Customer originalCustomer = new Customer("Rinkesh", "rinkesh@example.com", "9876543210", address);
+
+        System.out.println("Original Customer: ID=" + originalCustomer.getCustomerId()
+                + ", Name=" + originalCustomer.getName()
+                + ", Email=" + originalCustomer.getEmail()
+                + ", Mobile=" + originalCustomer.getMobile());
+        System.out.println("Address: " + originalCustomer.getAddress().getLine()
+                + ", " + originalCustomer.getAddress().getCity()
+                + " - " + originalCustomer.getAddress().getPincode());
+        System.out.println("originalCustomer instanceof Customer: " + (originalCustomer instanceof Customer));
+
+        Customer clonedCustomer = originalCustomer.clone();
+        System.out.println("\nCloned Customer:   ID=" + clonedCustomer.getCustomerId()
+                + ", Name=" + clonedCustomer.getName()
+                + ", Email=" + clonedCustomer.getEmail()
+                + ", Mobile=" + clonedCustomer.getMobile());
+
+        System.out.println("Distinct references (original != clone): " + (originalCustomer != clonedCustomer));
+        System.out.println("Same Customer ID:                      " + originalCustomer.getCustomerId().equals(clonedCustomer.getCustomerId()));
     }
 }
