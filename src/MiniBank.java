@@ -124,5 +124,25 @@ public class MiniBank {
 
         System.out.println("Distinct references (original != clone): " + (originalCustomer != clonedCustomer));
         System.out.println("Same Customer ID:                      " + originalCustomer.getCustomerId().equals(clonedCustomer.getCustomerId()));
+
+        System.out.println("\n===== INPUT VALIDATION (Validator) =====");
+        System.out.println("Valid Mobile (9876543210):         " + Validator.isValidMobile("9876543210"));
+        System.out.println("Invalid Mobile (12345):            " + Validator.isValidMobile("12345"));
+        System.out.println("Valid Email (rinkesh@example.com): " + Validator.isValidEmail("rinkesh@example.com"));
+        System.out.println("Invalid Email (rinkesh@):          " + Validator.isValidEmail("rinkesh@"));
+        System.out.println("Valid PAN (ABCDE1234F):            " + Validator.isValidPan("ABCDE1234F"));
+        System.out.println("Invalid PAN (ABC123):              " + Validator.isValidPan("ABC123"));
+        System.out.println("Valid IFSC (SBIN0001234):          " + Validator.isValidIfsc("SBIN0001234"));
+        System.out.println("Invalid IFSC (SBIN123):            " + Validator.isValidIfsc("SBIN123"));
+
+        System.out.println("\n===== COMMAND PARSING (CommandParser) =====");
+        Command command = CommandParser.parse("DEPOSIT AC0001 500");
+        System.out.println("Transaction Type: " + command.type());
+        System.out.println("Account Number:   " + command.accountNumber());
+        System.out.println("Amount:           " + command.amount());
+
+        System.out.println("\n===== ACCOUNT STATEMENT (StatementFormatter) =====");
+        String statement = StatementFormatter.buildStatement(accounts[0]);
+        System.out.println(statement);
     }
 }
