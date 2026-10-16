@@ -1,6 +1,8 @@
+package model;
+
 import java.util.Objects;
 
-public abstract class Account {
+public abstract class Account implements Transactable, InterestBearing {
     private static long accountCounter = 0;
 
     private final String accountNumber;
@@ -24,12 +26,14 @@ public abstract class Account {
         return String.format("AC%04d", accountCounter);
     }
 
-    // Each subclass declares its annual interest rate.
+    // Each subclass declares its annual interest rate (satisfies InterestBearing).
+    @Override
     public abstract double interestRate();
 
     // Each subclass decides whether a withdrawal of this amount is permitted.
     public abstract boolean canWithdraw(long amount);
 
+    @Override
     public void deposit(long amount) {
         if (amount > 0 && Long.MAX_VALUE - balance >= amount) {
             balance += amount;
@@ -38,6 +42,7 @@ public abstract class Account {
 
     // Delegates withdrawal eligibility to the subclass via canWithdraw().
     // This is runtime polymorphism: no subclass names appear here.
+    @Override
     public boolean withdraw(long amount) {
         if (amount <= 0) {
             return false;
@@ -61,6 +66,7 @@ public abstract class Account {
         return ownerName;
     }
 
+    @Override
     public long getBalance() {
         return balance;
     }

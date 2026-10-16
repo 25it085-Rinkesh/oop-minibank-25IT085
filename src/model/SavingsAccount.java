@@ -1,3 +1,5 @@
+package model;
+
 public class SavingsAccount extends Account {
 
     private long minBalance;

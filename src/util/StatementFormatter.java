@@ -1,3 +1,7 @@
+package util;
+
+import model.Account;
+
 public class StatementFormatter {
 
     public static String buildStatement(Account account) {

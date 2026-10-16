@@ -1,4 +1,22 @@
+package service;
+
+import model.Account;
+import model.BankInfo;
+import model.Command;
+import model.CurrentAccount;
+import model.Customer;
+import model.FixedDepositAccount;
+import model.MenuOption;
+import model.Premium;
+import model.SavingsAccount;
+import util.CommandParser;
+import util.StatementFormatter;
+import util.Validator;
+
 import java.util.Scanner;
+
+// Static import for one meaningful validator method (Practical 6 — Requirement 6).
+import static util.Validator.isValidMobile;
 
 public class MiniBank {
 
@@ -110,7 +128,6 @@ public class MiniBank {
         // --- D. Subclass-specific withdrawal rules ---
         System.out.println("\n===== WITHDRAWAL RULES =====");
 
-        // SavingsAccount — already shown above via pattern matching; show rejected case clearly
         System.out.println("\n-- SavingsAccount (min balance ₹1000) --");
         System.out.println("Balance: ₹" + savings.getBalance());
         boolean r1 = savings.withdraw(400);
@@ -118,17 +135,15 @@ public class MiniBank {
         boolean r2 = savings.withdraw(10000);
         System.out.println("Withdraw ₹10000 (would breach min) → success: " + r2 + " | Balance: ₹" + savings.getBalance());
 
-        // CurrentAccount
         System.out.println("\n-- CurrentAccount (overdraft limit ₹1000) --");
         System.out.println("Balance: ₹" + current.getBalance());
-        boolean r3 = current.withdraw(2500); // 2000 + 1000 limit = max 3000 total; leaves -500
+        boolean r3 = current.withdraw(2500);
         System.out.println("Withdraw ₹2500 (within limit, leaves ₹-500) → success: " + r3 + " | Balance: ₹" + current.getBalance());
-        boolean r4 = current.withdraw(600);  // balance -500, limit 1000 → max further = 500; 600 > 500
+        boolean r4 = current.withdraw(600);
         System.out.println("Withdraw ₹600  (exceeds limit)               → success: " + r4 + " | Balance: ₹" + current.getBalance());
-        boolean r5 = current.withdraw(500);  // exactly exhausts overdraft
+        boolean r5 = current.withdraw(500);
         System.out.println("Withdraw ₹500  (exactly hits limit)          → success: " + r5 + " | Balance: ₹" + current.getBalance());
 
-        // FixedDepositAccount
         System.out.println("\n-- FixedDepositAccount (locked) --");
         System.out.println("Balance: ₹" + fixedDeposit.getBalance());
         boolean r6 = fixedDeposit.withdraw(1);
@@ -136,7 +151,6 @@ public class MiniBank {
         boolean r7 = fixedDeposit.withdraw(5000);
         System.out.println("Withdraw ₹5000 (any amount rejected) → success: " + r7 + " | Balance: ₹" + fixedDeposit.getBalance());
 
-        // Zero / negative rejection (applies to all account types)
         System.out.println("\n-- Zero / negative withdrawal guard --");
         System.out.println("Withdraw ₹0   from savings → success: " + savings.withdraw(0));
         System.out.println("Withdraw ₹-50 from savings → success: " + savings.withdraw(-50));
@@ -145,7 +159,6 @@ public class MiniBank {
         // PRACTICALS 1–4 DEMONSTRATIONS (preserved)
         // ----------------------------------------------------------------
 
-        // Insufficient-funds example from Practical 1 — now uses SavingsAccount
         System.out.println("\n===== INSUFFICIENT-FUNDS EXAMPLE =====");
         SavingsAccount demo = new SavingsAccount("Customer3", 5000, 0);
         demo.deposit(1000);
@@ -159,7 +172,6 @@ public class MiniBank {
             System.out.println("Transaction rejected: Insufficient funds. Balance remains: ₹" + demo.getBalance());
         }
 
-        // toString(), equals(), hashCode()
         System.out.println("\n===== ACCOUNT DETAILS (toString()) =====");
         for (Account account : accounts) {
             System.out.println(account.toString());
@@ -171,14 +183,12 @@ public class MiniBank {
         System.out.println("savings hashCode  : " + savings.hashCode());
         System.out.println("current hashCode  : " + current.hashCode());
 
-        // instanceof (non-pattern) from Practical 1 — preserved
         System.out.println("\n===== TYPE CHECKING (instanceof) =====");
         Object obj = savings;
         System.out.println("obj instanceof Account        : " + (obj instanceof Account));
         System.out.println("savings instanceof Object     : " + (savings instanceof Object));
         System.out.println("savings instanceof SavingsAccount : " + (savings instanceof SavingsAccount));
 
-        // Customer, Address & cloning
         System.out.println("\n===== CUSTOMER, ADDRESS & CLONING =====");
         Customer.Address address = new Customer.Address("123 Main Road", "Navsari", "396445");
         Customer originalCustomer = new Customer("Rinkesh", "rinkesh@example.com", "9876543210", address);
@@ -200,10 +210,10 @@ public class MiniBank {
         System.out.println("Distinct references (original != clone): " + (originalCustomer != clonedCustomer));
         System.out.println("Same Customer ID:                      " + originalCustomer.getCustomerId().equals(clonedCustomer.getCustomerId()));
 
-        // Validator
+        // Static import used for isValidMobile; other Validator calls remain qualified.
         System.out.println("\n===== INPUT VALIDATION (Validator) =====");
-        System.out.println("Valid Mobile (9876543210):         " + Validator.isValidMobile("9876543210"));
-        System.out.println("Invalid Mobile (12345):            " + Validator.isValidMobile("12345"));
+        System.out.println("Valid Mobile (9876543210):         " + isValidMobile("9876543210"));
+        System.out.println("Invalid Mobile (12345):            " + isValidMobile("12345"));
         System.out.println("Valid Email (rinkesh@example.com): " + Validator.isValidEmail("rinkesh@example.com"));
         System.out.println("Invalid Email (rinkesh@):          " + Validator.isValidEmail("rinkesh@"));
         System.out.println("Valid PAN (ABCDE1234F):            " + Validator.isValidPan("ABCDE1234F"));
@@ -211,16 +221,84 @@ public class MiniBank {
         System.out.println("Valid IFSC (SBIN0001234):          " + Validator.isValidIfsc("SBIN0001234"));
         System.out.println("Invalid IFSC (SBIN123):            " + Validator.isValidIfsc("SBIN123"));
 
-        // CommandParser
         System.out.println("\n===== COMMAND PARSING (CommandParser) =====");
         Command command = CommandParser.parse("DEPOSIT AC0001 500");
         System.out.println("Transaction Type: " + command.type());
         System.out.println("Account Number:   " + command.accountNumber());
         System.out.println("Amount:           " + command.amount());
 
-        // StatementFormatter — works with any Account subclass
         System.out.println("\n===== ACCOUNT STATEMENT (StatementFormatter) =====");
         String statement = StatementFormatter.buildStatement(savings);
         System.out.println(statement);
+
+        // ----------------------------------------------------------------
+        // PRACTICAL 6 — INTERFACES, POLYMORPHISM, PACKAGES
+        // ----------------------------------------------------------------
+
+        // --- Requirement 2: yearlyInterest() via InterestBearing default method ---
+        System.out.println("\n===== YEARLY INTEREST (InterestBearing default method) =====");
+        // Recreate accounts with predictable balances for clear interest output.
+        // Use the same array already populated; balances have changed due to
+        // withdrawal demonstrations above, so we display actual current balances.
+        for (Account account : accounts) {
+            System.out.printf("Type: %-22s | Owner: %-8s | Balance: ₹%-8d | Rate: %.1f%% | Yearly Interest: ₹%.2f%n",
+                    account.getClass().getSimpleName(),
+                    account.getOwnerName(),
+                    account.getBalance(),
+                    account.interestRate(),
+                    account.yearlyInterest());
+        }
+        // CurrentAccount balance is negative after overdraft demo; verify interest on negative balance.
+        System.out.println("Note: CurrentAccount has a negative balance from the overdraft demonstration.");
+        System.out.println("      yearlyInterest() correctly returns: " + current.yearlyInterest()
+                + " (0.0% rate means no interest regardless of balance).");
+
+        // --- Requirement 3: WithdrawRule — anonymous class ---
+        System.out.println("\n===== WITHDRAW RULE — Anonymous Class =====");
+        WithdrawRule anonymousRule = new WithdrawRule() {
+            @Override
+            public boolean allow(Account account, long amount) {
+                return account != null
+                        && amount > 0
+                        && account.canWithdraw(amount);
+            }
+        };
+
+        // SavingsAccount after demonstrations: balance is ₹100 (5000-3500-400 = 1100, then -400 withdrawn above)
+        // Use the fixed-deposit account to show a rejected case (always locked).
+        long testAmountAllowed = 50;
+        long testAmountRejected = 1;
+        System.out.printf("Anonymous rule — SavingsAccount, withdraw ₹%d: allow = %b | Balance: ₹%d%n",
+                testAmountAllowed, anonymousRule.allow(savings, testAmountAllowed), savings.getBalance());
+        System.out.printf("Anonymous rule — FixedDepositAccount, withdraw ₹%d: allow = %b | Balance: ₹%d%n",
+                testAmountRejected, anonymousRule.allow(fixedDeposit, testAmountRejected), fixedDeposit.getBalance());
+        // Confirm balance is unchanged after allow() calls.
+        System.out.println("SavingsAccount balance after allow() calls (must be unchanged): ₹" + savings.getBalance());
+
+        // --- Requirement 3: WithdrawRule — lambda expression ---
+        System.out.println("\n===== WITHDRAW RULE — Lambda Expression =====");
+        WithdrawRule lambdaRule = (account, amount) ->
+                account != null
+                        && amount > 0
+                        && account.canWithdraw(amount);
+
+        System.out.printf("Lambda rule — SavingsAccount, withdraw ₹%d: allow = %b | Balance: ₹%d%n",
+                testAmountAllowed, lambdaRule.allow(savings, testAmountAllowed), savings.getBalance());
+        System.out.printf("Lambda rule — FixedDepositAccount, withdraw ₹%d: allow = %b | Balance: ₹%d%n",
+                testAmountRejected, lambdaRule.allow(fixedDeposit, testAmountRejected), fixedDeposit.getBalance());
+        System.out.println("SavingsAccount balance after lambda allow() calls (must be unchanged): ₹" + savings.getBalance());
+
+        // --- Requirement 4: Premium marker interface ---
+        System.out.println("\n===== PREMIUM MARKER INTERFACE =====");
+        System.out.println("Premium is declared as a marker interface in package model.");
+        System.out.println("It has no methods and no fields.");
+        System.out.println("Premium interface exists: " + Premium.class.getName());
+
+        // --- Practical 6: Transactable verification ---
+        System.out.println("\n===== TRANSACTABLE INTERFACE VERIFICATION =====");
+        // Account implements Transactable; all three subclasses inherit the behaviour.
+        System.out.println("savings  instanceof Transactable : " + (savings instanceof model.Transactable));
+        System.out.println("current  instanceof Transactable : " + (current instanceof model.Transactable));
+        System.out.println("fixedDeposit instanceof Transactable : " + (fixedDeposit instanceof model.Transactable));
     }
 }

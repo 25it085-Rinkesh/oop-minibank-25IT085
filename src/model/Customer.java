@@ -1,3 +1,5 @@
+package model;
+
 public class Customer implements Cloneable {
     private static long customerCounter = 100;
 

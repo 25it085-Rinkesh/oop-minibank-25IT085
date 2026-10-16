@@ -1,3 +1,5 @@
+package model;
+
 public class CurrentAccount extends Account {
 
     private long overdraftLimit;
