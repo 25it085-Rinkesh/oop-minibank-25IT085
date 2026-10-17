@@ -35,7 +35,10 @@ public abstract class Account implements Transactable, InterestBearing {
 
     @Override
     public void deposit(long amount) {
-        if (amount > 0 && Long.MAX_VALUE - balance >= amount) {
+        // Safe overflow check: rearranged to avoid subtraction from Long.MAX_VALUE
+        // when balance is negative. Since amount > 0, Long.MAX_VALUE - amount is
+        // always representable, so comparing balance <= Long.MAX_VALUE - amount is safe.
+        if (amount > 0 && balance <= Long.MAX_VALUE - amount) {
             balance += amount;
         }
     }
@@ -47,11 +50,17 @@ public abstract class Account implements Transactable, InterestBearing {
         if (amount <= 0) {
             return false;
         }
-        if (!canWithdraw(amount)) {
+        // Safe underflow precondition checked BEFORE canWithdraw() and before
+        // any subtraction. The expression `balance - amount < Long.MIN_VALUE`
+        // is always false in Java (long cannot be less than Long.MIN_VALUE),
+        // so that check gave no protection. Instead, rearrange:
+        //   balance - amount >= Long.MIN_VALUE
+        //   <=> balance >= Long.MIN_VALUE + amount
+        // Because amount > 0, Long.MIN_VALUE + amount is representable.
+        if (balance < Long.MIN_VALUE + amount) {
             return false;
         }
-        // Guard against arithmetic underflow before subtracting.
-        if (balance - amount < Long.MIN_VALUE) {
+        if (!canWithdraw(amount)) {
             return false;
         }
         balance -= amount;

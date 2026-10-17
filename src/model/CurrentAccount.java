@@ -6,7 +6,10 @@ public class CurrentAccount extends Account {
 
     public CurrentAccount(String ownerName, long openingBalance, long overdraftLimit) {
         super(ownerName, openingBalance);
-        this.overdraftLimit = (overdraftLimit >= 0) ? overdraftLimit : 0;
+        if (overdraftLimit < 0) {
+            throw new IllegalArgumentException("overdraftLimit cannot be negative: " + overdraftLimit);
+        }
+        this.overdraftLimit = overdraftLimit;
     }
 
     public long getOverdraftLimit() {
@@ -23,10 +26,13 @@ public class CurrentAccount extends Account {
         if (amount <= 0) {
             return false;
         }
-        // Balance may go negative, but must stay >= -overdraftLimit.
-        // Safe check: balance - amount >= -overdraftLimit
-        // Rearranged: balance + overdraftLimit >= amount
+        // Rule: balance - amount >= -overdraftLimit
+        // Rearranged to avoid overflow: balance >= amount - overdraftLimit
+        // Both amount and overdraftLimit are nonnegative, so their difference
+        // is in [-Long.MAX_VALUE, Long.MAX_VALUE] — always representable.
+        // The old form  balance + overdraftLimit >= amount  could overflow
+        // when balance is very large and overdraftLimit is also large.
         long balance = getBalance();
-        return balance + overdraftLimit >= amount;
+        return balance >= amount - overdraftLimit;
     }
 }

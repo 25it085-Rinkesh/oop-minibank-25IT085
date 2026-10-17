@@ -6,7 +6,10 @@ public class SavingsAccount extends Account {
 
     public SavingsAccount(String ownerName, long openingBalance, long minBalance) {
         super(ownerName, openingBalance);
-        this.minBalance = (minBalance >= 0) ? minBalance : 0;
+        if (minBalance < 0) {
+            throw new IllegalArgumentException("minBalance cannot be negative: " + minBalance);
+        }
+        this.minBalance = minBalance;
     }
 
     public long getMinBalance() {
@@ -23,9 +26,18 @@ public class SavingsAccount extends Account {
         if (amount <= 0) {
             return false;
         }
-        // Ensure balance - amount >= minBalance without underflow.
-        // Equivalent to: balance >= amount + minBalance, checked safely.
+        // Rule: balance - amount >= minBalance
+        // The expression balance - amount can underflow when balance is near
+        // Long.MIN_VALUE. Safe equivalent (minBalance >= 0 is guaranteed by
+        // the constructor clamp):
+        //   Step 1: if balance < minBalance the check can never pass.
+        //   Step 2: balance - minBalance >= amount, where balance - minBalance
+        //           is nonnegative (step 1 ensures balance >= minBalance), so
+        //           no underflow is possible.
         long balance = getBalance();
-        return balance - amount >= minBalance;
+        if (balance < minBalance) {
+            return false;
+        }
+        return balance - minBalance >= amount;
     }
 }
