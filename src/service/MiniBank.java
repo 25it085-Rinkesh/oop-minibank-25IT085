@@ -12,6 +12,7 @@ import model.SavingsAccount;
 import util.CommandParser;
 import util.StatementFormatter;
 import util.Validator;
+import util.AnnotationValidator;
 
 import java.util.Scanner;
 
@@ -300,5 +301,89 @@ public class MiniBank {
         System.out.println("savings  instanceof Transactable : " + (savings instanceof model.Transactable));
         System.out.println("current  instanceof Transactable : " + (current instanceof model.Transactable));
         System.out.println("fixedDeposit instanceof Transactable : " + (fixedDeposit instanceof model.Transactable));
+
+        // ----------------------------------------------------------------
+        // PRACTICAL 7 — CUSTOM ANNOTATIONS, REFLECTION, RUNTIME VALIDATION
+        // ----------------------------------------------------------------
+
+        System.out.println("\n===== ANNOTATION VALIDATION (Reflection) =====");
+
+        // --- Test 1: Valid account — no errors expected ---
+        System.out.println("\n-- Test 1: Valid account (positive balance, name within 50 chars) --");
+        CurrentAccount validAccount = new CurrentAccount("Alice", 1000, 500);
+        String[] noErrors = AnnotationValidator.validate(validAccount);
+        System.out.println("Errors found: " + noErrors.length + (noErrors.length == 0 ? " (PASS — no violations)" : ""));
+
+        // --- Test 2: Negative balance triggers @Positive violation ---
+        System.out.println("\n-- Test 2: Negative balance — expects balance @Positive error --");
+        CurrentAccount invalidAccount = new CurrentAccount("ValidationTest", -100, 1000);
+        String[] balanceErrors = AnnotationValidator.validate(invalidAccount);
+        System.out.println("Errors found: " + balanceErrors.length);
+        for (String err : balanceErrors) {
+            System.out.println("  [ERROR] " + err);
+        }
+
+        // --- Test 3: Zero balance triggers @Positive violation ---
+        System.out.println("\n-- Test 3: Zero balance — strictly-positive rule requires balance > 0 --");
+        SavingsAccount zeroBalance = new SavingsAccount("ZeroTest", 0, 0);
+        String[] zeroErrors = AnnotationValidator.validate(zeroBalance);
+        System.out.println("Errors found: " + zeroErrors.length);
+        for (String err : zeroErrors) {
+            System.out.println("  [ERROR] " + err);
+        }
+
+        // --- Test 4: Name exactly at 50 chars — no @MaxLength error ---
+        System.out.println("\n-- Test 4: Owner name exactly 50 characters — no MaxLength error --");
+        String name50 = "A".repeat(50);
+        CurrentAccount exactLength = new CurrentAccount(name50, 500, 200);
+        String[] exactErrors = AnnotationValidator.validate(exactLength);
+        // filter to MaxLength errors only for clarity
+        long maxLenViolations = java.util.Arrays.stream(exactErrors)
+                .filter(e -> e.contains("must have at most")).count();
+        System.out.println("MaxLength violations: " + maxLenViolations + (maxLenViolations == 0 ? " (PASS)" : " (FAIL)"));
+
+        // --- Test 5: Name longer than 50 chars triggers @MaxLength error ---
+        System.out.println("\n-- Test 5: Owner name 51 characters — expects MaxLength error --");
+        String name51 = "B".repeat(51);
+        CurrentAccount longName = new CurrentAccount(name51, 500, 200);
+        String[] longNameErrors = AnnotationValidator.validate(longName);
+        System.out.println("Errors found: " + longNameErrors.length);
+        for (String err : longNameErrors) {
+            System.out.println("  [ERROR] " + err);
+        }
+
+        // --- Test 6: Both negative balance AND overlong name ---
+        System.out.println("\n-- Test 6: Negative balance + name > 50 chars — expects two errors --");
+        CurrentAccount bothBad = new CurrentAccount("B".repeat(55), -200, 1000);
+        String[] bothErrors = AnnotationValidator.validate(bothBad);
+        System.out.println("Errors found: " + bothErrors.length);
+        for (String err : bothErrors) {
+            System.out.println("  [ERROR] " + err);
+        }
+
+        // --- Test 7: Null object ---
+        System.out.println("\n-- Test 7: null object --");
+        String[] nullErrors = AnnotationValidator.validate(null);
+        System.out.println("Errors found: " + nullErrors.length);
+        for (String err : nullErrors) {
+            System.out.println("  [ERROR] " + err);
+        }
+
+        // --- Test 8: Superclass hierarchy — SavingsAccount and FixedDepositAccount ---
+        System.out.println("\n-- Test 8: Superclass hierarchy — @Positive on Account.balance found via SavingsAccount and FixedDepositAccount --");
+        SavingsAccount negSavings = new SavingsAccount("HierarchyTest", -500, 0);
+        String[] savErrors = AnnotationValidator.validate(negSavings);
+        System.out.println("SavingsAccount(-500) errors: " + savErrors.length);
+        for (String err : savErrors) {
+            System.out.println("  [ERROR] " + err);
+        }
+        FixedDepositAccount negFD = new FixedDepositAccount("FDTest", -1);
+        String[] fdErrors = AnnotationValidator.validate(negFD);
+        System.out.println("FixedDepositAccount(-1) errors: " + fdErrors.length);
+        for (String err : fdErrors) {
+            System.out.println("  [ERROR] " + err);
+        }
+
+        System.out.println("\n===== PRACTICAL 7 COMPLETE =====");
     }
 }
