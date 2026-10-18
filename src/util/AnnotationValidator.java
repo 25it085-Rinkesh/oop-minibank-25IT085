@@ -8,7 +8,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Practical 7 — Requirement 4.
  * Inspects an object through Java reflection and returns validation errors
  * produced by the {@code @Positive} and {@code @MaxLength} annotations.
  * The validator traverses the full superclass hierarchy so that annotations
@@ -33,7 +32,6 @@ public class AnnotationValidator {
 
         List<String> errors = new ArrayList<>();
 
-        // Traverse the class hierarchy: concrete class → Account → … → Object.
         Class<?> clazz = obj.getClass();
         while (clazz != null && clazz != Object.class) {
             for (Field field : clazz.getDeclaredFields()) {
@@ -45,10 +43,6 @@ public class AnnotationValidator {
 
         return errors.toArray(new String[0]);
     }
-
-    // -----------------------------------------------------------------------
-    // Private helpers
-    // -----------------------------------------------------------------------
 
     private static void validateField(Object obj, Field field, List<String> errors) {
         validatePositive(obj, field, errors);

@@ -32,11 +32,9 @@ public abstract class Account implements Transactable, InterestBearing {
         return String.format("AC%04d", accountCounter);
     }
 
-    // Each subclass declares its annual interest rate (satisfies InterestBearing).
     @Override
     public abstract double interestRate();
 
-    // Each subclass decides whether a withdrawal of this amount is permitted.
     public abstract boolean canWithdraw(long amount);
 
     @Override
@@ -49,8 +47,6 @@ public abstract class Account implements Transactable, InterestBearing {
         }
     }
 
-    // Delegates withdrawal eligibility to the subclass via canWithdraw().
-    // This is runtime polymorphism: no subclass names appear here.
     @Override
     public boolean withdraw(long amount) {
         if (amount <= 0) {
