@@ -16,4 +16,10 @@ public class FixedDepositAccount extends Account {
         // Fixed deposits are locked; no withdrawals permitted.
         return false;
     }
+
+    @Override
+    public long maxWithdrawable() {
+        // Locked account — nothing can ever be withdrawn.
+        return 0L;
+    }
 }

@@ -1,5 +1,9 @@
 package model;
 
+import exception.AccountNotFoundException;
+import exception.BankException;
+import exception.InsufficientFundsException;
+import exception.InvalidAmountException;
 import java.util.Objects;
 import model.annotation.Id;
 import model.annotation.MaxLength;
@@ -37,36 +41,113 @@ public abstract class Account implements Transactable, InterestBearing {
 
     public abstract boolean canWithdraw(long amount);
 
+    /**
+     * Returns the maximum amount that may be withdrawn from this account right
+     * now under its specific rules (minimum-balance floor, overdraft limit, or
+     * locked status).  Always non-negative.
+     */
+    public abstract long maxWithdrawable();
+
     @Override
-    public void deposit(long amount) {
+    public void deposit(long amount) throws InvalidAmountException {
+        if (amount <= 0) {
+            throw new InvalidAmountException(
+                    "Deposit amount must be positive, but was: " + amount);
+        }
         // Safe overflow check: rearranged to avoid subtraction from Long.MAX_VALUE
         // when balance is negative. Since amount > 0, Long.MAX_VALUE - amount is
         // always representable, so comparing balance <= Long.MAX_VALUE - amount is safe.
-        if (amount > 0 && balance <= Long.MAX_VALUE - amount) {
-            balance += amount;
+        if (balance > Long.MAX_VALUE - amount) {
+            throw new InvalidAmountException(
+                    "Deposit of " + amount + " would overflow the account balance.");
         }
+        balance += amount;
     }
 
     @Override
-    public boolean withdraw(long amount) {
+    public boolean withdraw(long amount) throws InsufficientFundsException, InvalidAmountException {
         if (amount <= 0) {
-            return false;
+            throw new InvalidAmountException(
+                    "Withdrawal amount must be positive, but was: " + amount);
         }
         // Safe underflow precondition checked BEFORE canWithdraw() and before
-        // any subtraction. The expression `balance - amount < Long.MIN_VALUE`
-        // is always false in Java (long cannot be less than Long.MIN_VALUE),
-        // so that check gave no protection. Instead, rearrange:
-        //   balance - amount >= Long.MIN_VALUE
-        //   <=> balance >= Long.MIN_VALUE + amount
-        // Because amount > 0, Long.MIN_VALUE + amount is representable.
+        // any subtraction. Rearranged: balance - amount >= Long.MIN_VALUE
+        // <=> balance >= Long.MIN_VALUE + amount (safe since amount > 0).
         if (balance < Long.MIN_VALUE + amount) {
-            return false;
+            throw new InsufficientFundsException(
+                    "Withdrawal of " + amount + " would underflow the account balance.", 0L);
         }
         if (!canWithdraw(amount)) {
-            return false;
+            // Shortfall = how much the requested amount exceeds the maximum
+            // currently withdrawable under this account's specific rules.
+            // maxWithdrawable() is always >= 0 and amount > 0, so the
+            // subtraction is safe from overflow (result fits in a long).
+            long shortfall = amount - maxWithdrawable();
+            throw new InsufficientFundsException(
+                    "Withdrawal of " + amount + " is not permitted on this account "
+                            + "(balance: " + balance + ").",
+                    shortfall);
         }
         balance -= amount;
         return true;
+    }
+
+    /**
+     * Transfers {@code amount} from this account to {@code to}.
+     *
+     * <p>If the source is debited but the destination credit fails, the source
+     * is credited back (rollback). Any rollback failure is attached as a
+     * suppressed exception before rethrowing.
+     *
+     * @throws AccountNotFoundException if {@code to} is null or this == to
+     * @throws InvalidAmountException   if {@code amount <= 0}
+     * @throws InsufficientFundsException if this account cannot cover the withdrawal
+     * @throws BankException            for any other bank-side failure
+     */
+    public void transfer(Account to, long amount) throws BankException {
+        if (to == null) {
+            throw new AccountNotFoundException(
+                    "Transfer failed: destination account is null.");
+        }
+        if (this == to) {
+            throw new BankException(
+                    "Transfer failed: source and destination are the same account ("
+                            + accountNumber + ").");
+        }
+        if (amount <= 0) {
+            throw new InvalidAmountException(
+                    "Transfer amount must be positive, but was: " + amount);
+        }
+
+        // Pre-check: destination must be able to accept the funds.
+        // Safe overflow check: amount > 0, so Long.MAX_VALUE - amount is representable.
+        if (to.getBalance() > Long.MAX_VALUE - amount) {
+            throw new InvalidAmountException(
+                    "Transfer of " + amount + " would overflow the destination account balance.");
+        }
+
+        boolean debited = false;
+
+        try {
+            withdraw(amount);
+            debited = true;
+            to.deposit(amount);
+        } catch (BankException e) {
+            if (debited) {
+                // Rollback: credit the amount back to the source.
+                try {
+                    deposit(amount);
+                } catch (InvalidAmountException rollbackEx) {
+                    // Rollback itself failed — attach as suppressed so the
+                    // original failure is still the primary exception.
+                    e.addSuppressed(rollbackEx);
+                }
+            }
+            throw e;
+        } finally {
+            // In a production system this block would flush a transaction log
+            // or release a distributed lock held for the duration of the transfer.
+        }
     }
 
     public String getAccountNumber() {

@@ -1,5 +1,9 @@
 package service;
 
+import exception.AccountNotFoundException;
+import exception.BankException;
+import exception.InsufficientFundsException;
+import exception.InvalidAmountException;
 import model.Account;
 import model.BankInfo;
 import model.Command;
@@ -24,7 +28,12 @@ public class MiniBank {
 
     public static void main(String[] args) {
 
-        runDemonstrations();
+        // Unexpected exceptions from demonstrations surface here as a friendly message.
+        try {
+            runDemonstrations();
+        } catch (Exception e) {
+            System.out.println("Demonstration encountered an unexpected error: " + e.getMessage());
+        }
 
         BankInfo bank = new BankInfo("MiniBank", "Navsari");
 
@@ -37,58 +46,56 @@ public class MiniBank {
         Scanner sc = new Scanner(System.in);
         int choice = -1;
 
-        do {
-            System.out.println("\n---------- Menu ----------");
-            System.out.println("1. Open Account");
-            System.out.println("2. Deposit");
-            System.out.println("3. Withdraw");
-            System.out.println("4. Transfer");
-            System.out.println("5. Exit");
-            System.out.print("Enter your choice: ");
+        try {
+            do {
+                System.out.println("\n---------- Menu ----------");
+                System.out.println("1. Open Account");
+                System.out.println("2. Deposit");
+                System.out.println("3. Withdraw");
+                System.out.println("4. Transfer");
+                System.out.println("5. Exit");
+                System.out.print("Enter your choice: ");
 
-            if (!sc.hasNextInt()) {
-                if (!sc.hasNext()) {
-                    break;
+                if (!sc.hasNextInt()) {
+                    if (!sc.hasNext()) {
+                        break;
+                    }
+                    sc.next();
+                    System.out.println("Invalid input! Please enter a number from 1 to 5.");
+                    continue;
                 }
-                sc.next();
-                System.out.println("Invalid input! Please enter a number from 1 to 5.");
-                continue;
-            }
 
-            choice = sc.nextInt();
+                choice = sc.nextInt();
 
-            MenuOption option = switch (choice) {
-                case 1 -> MenuOption.OPEN_ACCOUNT;
-                case 2 -> MenuOption.DEPOSIT;
-                case 3 -> MenuOption.WITHDRAW;
-                case 4 -> MenuOption.TRANSFER;
-                case 5 -> MenuOption.EXIT;
-                default -> null;
-            };
+                MenuOption option = switch (choice) {
+                    case 1 -> MenuOption.OPEN_ACCOUNT;
+                    case 2 -> MenuOption.DEPOSIT;
+                    case 3 -> MenuOption.WITHDRAW;
+                    case 4 -> MenuOption.TRANSFER;
+                    case 5 -> MenuOption.EXIT;
+                    default -> null;
+                };
 
-            if (option == null) {
-                System.out.println("Invalid choice! Please try again.");
-                continue;
-            }
+                if (option == null) {
+                    System.out.println("Invalid choice! Please try again.");
+                    continue;
+                }
 
-            String message = switch (option) {
-                case OPEN_ACCOUNT -> "Open Account - To be implemented in a later lab.";
-                case DEPOSIT      -> "Deposit - To be implemented in a later lab.";
-                case WITHDRAW     -> "Withdraw - To be implemented in a later lab.";
-                case TRANSFER     -> "Transfer - To be implemented in a later lab.";
-                case EXIT         -> "Thank you for using MiniBank. Goodbye!";
-            };
+                String message = switch (option) {
+                    case OPEN_ACCOUNT -> "Open Account - To be implemented in a later lab.";
+                    case DEPOSIT      -> "Deposit - To be implemented in a later lab.";
+                    case WITHDRAW     -> "Withdraw - To be implemented in a later lab.";
+                    case TRANSFER     -> "Transfer - To be implemented in a later lab.";
+                    case EXIT         -> "Thank you for using MiniBank. Goodbye!";
+                };
 
-            System.out.println(message);
+                System.out.println(message);
 
-        } while (choice != 5);
-
-        sc.close();
+            } while (choice != 5);
+        } finally {
+            sc.close();
+        }
     }
-
-    // -----------------------------------------------------------------------
-    // Demonstration methods (Practicals 1 – 7)
-    // -----------------------------------------------------------------------
 
     private static void runDemonstrations() {
         SavingsAccount savings      = new SavingsAccount("Rinkesh", 5000, 1000);
@@ -109,7 +116,9 @@ public class MiniBank {
         demoWithdrawRule(savings, fixedDeposit);
         demoInterfaces(savings, current, fixedDeposit);
         demoAnnotationValidation();
+        demoTransfers();
     }
+
 
     private static void demoPolymorphism(Account[] accounts) {
         System.out.println("\n" + SEP);
@@ -132,10 +141,10 @@ public class MiniBank {
                 System.out.println("SavingsAccount — owner: " + sa.getOwnerName());
                 System.out.println("  Min balance : ₹" + sa.getMinBalance());
                 System.out.println("  Balance     : ₹" + sa.getBalance());
-                System.out.println("  Withdraw ₹3500 (leaves ₹1500 >= min ₹1000): "
-                        + sa.withdraw(3500) + " | balance: ₹" + sa.getBalance());
-                System.out.println("  Withdraw ₹600  (would leave ₹900 < min ₹1000): "
-                        + sa.withdraw(600) + " | balance: ₹" + sa.getBalance());
+                tryWithdraw(sa, 3500,
+                        "  Withdraw ₹3500 (leaves ₹1500 >= min ₹1000)");
+                tryWithdraw(sa, 600,
+                        "  Withdraw ₹600  (would leave ₹900 < min ₹1000)");
             }
         }
         System.out.println("instanceof Account        : " + (savings instanceof Account));
@@ -151,21 +160,21 @@ public class MiniBank {
         System.out.println(SEP);
 
         System.out.println("SavingsAccount (min balance ₹1000)  balance: ₹" + savings.getBalance());
-        System.out.println("  Withdraw ₹400                → " + savings.withdraw(400)  + " | balance: ₹" + savings.getBalance());
-        System.out.println("  Withdraw ₹10000 (breach min) → " + savings.withdraw(10000) + " | balance: ₹" + savings.getBalance());
+        tryWithdraw(savings,  400,   "  Withdraw ₹400               ");
+        tryWithdraw(savings, 10000,  "  Withdraw ₹10000 (breach min)");
 
         System.out.println("CurrentAccount (overdraft ₹1000)   balance: ₹" + current.getBalance());
-        System.out.println("  Withdraw ₹2500 (within limit)  → " + current.withdraw(2500) + " | balance: ₹" + current.getBalance());
-        System.out.println("  Withdraw ₹600  (exceeds limit) → " + current.withdraw(600)  + " | balance: ₹" + current.getBalance());
-        System.out.println("  Withdraw ₹500  (hits limit)    → " + current.withdraw(500)  + " | balance: ₹" + current.getBalance());
+        tryWithdraw(current, 2500,  "  Withdraw ₹2500 (within limit) ");
+        tryWithdraw(current,  600,  "  Withdraw ₹600  (exceeds limit)");
+        tryWithdraw(current,  500,  "  Withdraw ₹500  (hits limit)   ");
 
         System.out.println("FixedDepositAccount (locked)        balance: ₹" + fixedDeposit.getBalance());
-        System.out.println("  Withdraw ₹1    → " + fixedDeposit.withdraw(1)    + " | balance: ₹" + fixedDeposit.getBalance());
-        System.out.println("  Withdraw ₹5000 → " + fixedDeposit.withdraw(5000) + " | balance: ₹" + fixedDeposit.getBalance());
+        tryWithdraw(fixedDeposit,    1, "  Withdraw ₹1   ");
+        tryWithdraw(fixedDeposit, 5000, "  Withdraw ₹5000");
 
         System.out.println("Zero / negative guard:");
-        System.out.println("  Withdraw ₹0   from savings → " + savings.withdraw(0));
-        System.out.println("  Withdraw ₹-50 from savings → " + savings.withdraw(-50));
+        tryWithdrawInvalid(savings, 0,   "  Withdraw ₹0   from savings");
+        tryWithdrawInvalid(savings, -50, "  Withdraw ₹-50 from savings");
     }
 
     private static void demoInsufficientFunds() {
@@ -173,14 +182,19 @@ public class MiniBank {
         System.out.println("Insufficient Funds");
         System.out.println(SEP);
         SavingsAccount demo = new SavingsAccount("Customer3", 5000, 0);
-        demo.deposit(1000);
-        demo.withdraw(2500);
+        tryDeposit(demo, 1000);
+        tryWithdraw(demo, 2500, "Withdraw ₹2500");
         long bigWithdraw = 10000;
         System.out.println("Withdraw ₹" + bigWithdraw + " from " + demo.getOwnerName()
                 + " (balance: ₹" + demo.getBalance() + ")");
-        boolean ok = demo.withdraw(bigWithdraw);
-        System.out.println("Result: " + (ok ? "success" : "rejected — insufficient funds")
-                + " | balance: ₹" + demo.getBalance());
+        try {
+            demo.withdraw(bigWithdraw);
+            System.out.println("Result: success | balance: ₹" + demo.getBalance());
+        } catch (InsufficientFundsException e) {
+            System.out.println("Result: rejected — insufficient funds | balance: ₹" + demo.getBalance());
+        } catch (InvalidAmountException e) {
+            System.out.println("Result: rejected — invalid amount | balance: ₹" + demo.getBalance());
+        }
     }
 
     private static void demoEquality(Account[] accounts, SavingsAccount savings, CurrentAccount current) {
@@ -364,6 +378,169 @@ public class MiniBank {
         String[] e8b = AnnotationValidator.validate(negFD);
         System.out.println("FixedDepositAccount(-1) — Account.balance via hierarchy : "
                 + (containsField(e8b, "balance") ? "PASS  → " + e8b[0] : "FAIL"));
+    }
+
+    private static void demoTransfers() {
+        System.out.println("\n" + SEP);
+        System.out.println("Transfers & Error Handling");
+        System.out.println(SEP);
+
+        demoSuccessfulTransfer();
+        demoFailedTransfers();
+        demoTryWithResources();
+    }
+
+    private static void demoSuccessfulTransfer() {
+        System.out.println("\n[Transfer] Successful transfer:");
+        SavingsAccount src  = new SavingsAccount("Alice", 5000, 0);
+        SavingsAccount dest = new SavingsAccount("Bob",   1000, 0);
+        long amount = 2000;
+
+        long srcBefore  = src.getBalance();
+        long destBefore = dest.getBalance();
+
+        System.out.printf("  Before: %s balance=₹%d, %s balance=₹%d%n",
+                src.getOwnerName(), srcBefore, dest.getOwnerName(), destBefore);
+        System.out.println("  Transferring ₹" + amount + " from " + src.getOwnerName()
+                + " → " + dest.getOwnerName());
+
+        try {
+            src.transfer(dest, amount);
+            long srcAfter  = src.getBalance();
+            long destAfter = dest.getBalance();
+            System.out.printf("  After : %s balance=₹%d, %s balance=₹%d%n",
+                    src.getOwnerName(), srcAfter, dest.getOwnerName(), destAfter);
+            boolean correct = (srcAfter == srcBefore - amount) && (destAfter == destBefore + amount);
+            System.out.println("  Balance check: " + (correct ? "PASS" : "FAIL"));
+        } catch (BankException e) {
+            System.out.println("  Unexpected failure: " + e.getMessage());
+        }
+    }
+
+    private static void demoFailedTransfers() {
+        System.out.println("\n[Transfer] Failed transfer — insufficient funds:");
+        SavingsAccount poor   = new SavingsAccount("Charlie", 500, 0);
+        SavingsAccount target = new SavingsAccount("Diana",  1000, 0);
+        long poorBefore   = poor.getBalance();
+        long targetBefore = target.getBalance();
+        try {
+            poor.transfer(target, 2000);
+            System.out.println("  FAIL — expected InsufficientFundsException");
+        } catch (InsufficientFundsException e) {
+            System.out.println("  Rejected: " + e.getMessage());
+            System.out.println("  Shortfall: ₹" + e.getShortfall());
+            boolean unchanged = poor.getBalance() == poorBefore && target.getBalance() == targetBefore;
+            System.out.println("  Balances unchanged: " + (unchanged ? "PASS" : "FAIL"));
+        } catch (BankException e) {
+            System.out.println("  Unexpected exception type: " + e.getMessage());
+        }
+
+        System.out.println("\n[Transfer] Failed transfer — null destination:");
+        SavingsAccount any = new SavingsAccount("Eve", 3000, 0);
+        long anyBefore = any.getBalance();
+        try {
+            any.transfer(null, 100);
+            System.out.println("  FAIL — expected AccountNotFoundException");
+        } catch (AccountNotFoundException e) {
+            System.out.println("  Rejected: " + e.getMessage());
+            System.out.println("  Balance unchanged: " + (any.getBalance() == anyBefore ? "PASS" : "FAIL"));
+        } catch (BankException e) {
+            System.out.println("  Unexpected exception type: " + e.getMessage());
+        }
+
+        System.out.println("\n[Transfer] Failed transfer — zero amount:");
+        SavingsAccount from = new SavingsAccount("Frank", 2000, 0);
+        SavingsAccount to   = new SavingsAccount("Grace", 2000, 0);
+        long fromBefore = from.getBalance();
+        long toBefore   = to.getBalance();
+        try {
+            from.transfer(to, 0);
+            System.out.println("  FAIL — expected InvalidAmountException");
+        } catch (InvalidAmountException e) {
+            System.out.println("  Rejected: " + e.getMessage());
+            boolean unchanged = from.getBalance() == fromBefore && to.getBalance() == toBefore;
+            System.out.println("  Balances unchanged: " + (unchanged ? "PASS" : "FAIL"));
+        } catch (BankException e) {
+            System.out.println("  Unexpected exception type: " + e.getMessage());
+        }
+
+        System.out.println("\n[Transfer] Failed transfer — self-transfer:");
+        SavingsAccount self = new SavingsAccount("Hank", 3000, 0);
+        long selfBefore = self.getBalance();
+        try {
+            self.transfer(self, 500);
+            System.out.println("  FAIL — expected BankException");
+        } catch (BankException e) {
+            System.out.println("  Rejected: " + e.getMessage());
+            System.out.println("  Balance unchanged: " + (self.getBalance() == selfBefore ? "PASS" : "FAIL"));
+        }
+
+        System.out.println("\n[Transfer] Failed transfer — destination overflow:");
+        SavingsAccount richSrc  = new SavingsAccount("Ivan",   1000, 0);
+        CurrentAccount nearMax = new CurrentAccount("Jane", 0, 0);
+        long safeDeposit = Long.MAX_VALUE - 500;
+        long richBefore   = richSrc.getBalance();
+        long nearMaxBefore = nearMax.getBalance();
+        try {
+            nearMax.deposit(safeDeposit);
+            nearMaxBefore = nearMax.getBalance();
+            richSrc.transfer(nearMax, 1000);
+            System.out.println("  FAIL — expected InvalidAmountException for overflow");
+        } catch (InvalidAmountException e) {
+            System.out.println("  Rejected (overflow): " + e.getMessage());
+            boolean unchanged = richSrc.getBalance() == richBefore
+                    && nearMax.getBalance() == nearMaxBefore;
+            System.out.println("  Balances unchanged: " + (unchanged ? "PASS" : "FAIL"));
+        } catch (BankException e) {
+            System.out.println("  Caught BankException: " + e.getMessage());
+        }
+    }
+
+    private static void demoTryWithResources() {
+        System.out.println("\n[Try-with-Resources] DemoResource:");
+        try (DemoResource resource = new DemoResource()) {
+            resource.use();
+        } catch (Exception e) {
+            System.out.println("Resource demonstration failed: " + e.getMessage());
+        }
+    }
+
+
+    /** Attempts a withdrawal; prints success or the appropriate rejection message. */
+    private static void tryWithdraw(Account account, long amount, String label) {
+        try {
+            boolean ok = account.withdraw(amount);
+            System.out.println(label + " → " + ok + " | balance: ₹" + account.getBalance());
+        } catch (InsufficientFundsException e) {
+            System.out.println(label + " → rejected (insufficient funds, shortfall ₹"
+                    + e.getShortfall() + ") | balance: ₹" + account.getBalance());
+        } catch (InvalidAmountException e) {
+            System.out.println(label + " → rejected (invalid amount) | balance: ₹"
+                    + account.getBalance());
+        }
+    }
+
+    /** For zero/negative withdrawal demonstrations — expects InvalidAmountException. */
+    private static void tryWithdrawInvalid(Account account, long amount, String label) {
+        long before = account.getBalance();
+        try {
+            account.withdraw(amount);
+            System.out.println(label + " → false");
+        } catch (InvalidAmountException e) {
+            System.out.println(label + " → rejected (invalid amount) | balance unchanged: ₹"
+                    + account.getBalance());
+        } catch (InsufficientFundsException e) {
+            System.out.println(label + " → rejected (insufficient) | balance: ₹" + account.getBalance());
+        }
+    }
+
+    /** Attempts a deposit silently; used in demonstration setup. */
+    private static void tryDeposit(Account account, long amount) {
+        try {
+            account.deposit(amount);
+        } catch (InvalidAmountException e) {
+            System.out.println("Deposit ₹" + amount + " rejected: " + e.getMessage());
+        }
     }
 
     private static boolean containsField(String[] errors, String fieldName) {

@@ -35,4 +35,16 @@ public class CurrentAccount extends Account {
         long balance = getBalance();
         return balance >= amount - overdraftLimit;
     }
+
+    @Override
+    public long maxWithdrawable() {
+        // Available to withdraw = balance + overdraftLimit, floored at 0.
+        // Overflow is only possible when balance > 0 and overdraftLimit > 0
+        // and their sum would exceed Long.MAX_VALUE. Detect that case and cap.
+        long balance = getBalance();
+        if (balance >= 0 && overdraftLimit > Long.MAX_VALUE - balance) {
+            return Long.MAX_VALUE;          // astronomically large — effectively unlimited
+        }
+        return Math.max(0L, balance + overdraftLimit);
+    }
 }

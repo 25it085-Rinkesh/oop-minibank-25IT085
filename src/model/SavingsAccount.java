@@ -40,4 +40,13 @@ public class SavingsAccount extends Account {
         }
         return balance - minBalance >= amount;
     }
+
+    @Override
+    public long maxWithdrawable() {
+        // Available to withdraw = balance - minBalance, floored at 0.
+        // No overflow: minBalance >= 0 (constructor-guaranteed) and we floor
+        // the result so a negative difference is reported as 0.
+        long balance = getBalance();
+        return Math.max(0L, balance - minBalance);
+    }
 }
