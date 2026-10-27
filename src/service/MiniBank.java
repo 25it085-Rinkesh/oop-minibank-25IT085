@@ -117,6 +117,7 @@ public class MiniBank {
         demoInterfaces(savings, current, fixedDeposit);
         demoAnnotationValidation();
         demoTransfers();
+        demoConcurrentDeposits();
     }
 
 
@@ -503,6 +504,49 @@ public class MiniBank {
         } catch (Exception e) {
             System.out.println("Resource demonstration failed: " + e.getMessage());
         }
+    }
+
+    private static void demoConcurrentDeposits() {
+        System.out.println("\n" + SEP);
+        System.out.println("Concurrent Deposits — Synchronization Demo");
+        System.out.println(SEP);
+
+        final int  THREAD_COUNT = 10;
+        final int  DEPOSITS_PER_THREAD = 10_000;
+        final long DEPOSIT_AMOUNT = 1L;
+        final long INITIAL_BALANCE = 0L;
+
+        SavingsAccount shared = new SavingsAccount("SharedAccount", INITIAL_BALANCE, 0);
+
+        Thread[] workers = new Thread[THREAD_COUNT];
+        for (int i = 0; i < THREAD_COUNT; i++) {
+            workers[i] = new Thread(
+                    new AccountWorker(shared, DEPOSITS_PER_THREAD, DEPOSIT_AMOUNT),
+                    "BankWorker-" + (i + 1));
+        }
+
+        for (Thread t : workers) {
+            t.start();
+        }
+
+        for (Thread t : workers) {
+            try {
+                t.join();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                System.out.println("Main thread interrupted while waiting for workers.");
+            }
+        }
+
+        long expected = INITIAL_BALANCE + (long) THREAD_COUNT * DEPOSITS_PER_THREAD * DEPOSIT_AMOUNT;
+        long actual   = shared.getBalance();
+
+        System.out.println("Threads       : " + THREAD_COUNT);
+        System.out.println("Deposits/thread: " + DEPOSITS_PER_THREAD);
+        System.out.println("Amount/deposit : \u20b9" + DEPOSIT_AMOUNT);
+        System.out.println("Expected balance: \u20b9" + expected);
+        System.out.println("Actual   balance: \u20b9" + actual);
+        System.out.println("Result          : " + (actual == expected ? "PASS" : "FAIL"));
     }
 
 
