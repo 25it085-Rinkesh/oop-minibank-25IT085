@@ -36,14 +36,19 @@ public class TestRunner {
         long failed = summary.getTotalFailureCount();
         long passed = summary.getTestsSucceededCount();
         long found  = summary.getTestsFoundCount();
+        long containerFailed = summary.getContainersFailedCount();
+
+        boolean allPassed = (found > 0) && (failed == 0) && (containerFailed == 0);
 
         System.out.println("\n----------------------------------------");
         System.out.printf("Tests Run: %d, Succeeded: %d, Failed: %d%n", found, passed, failed);
-        System.out.println("Result   : " + (failed == 0 ? "ALL TESTS PASSED" : "TEST FAILURES DETECTED"));
+        System.out.println("Result   : " + (allPassed ? "ALL TESTS PASSED" : "TEST FAILURES OR NO TESTS DETECTED"));
         System.out.println("========================================");
 
-        if (failed > 0) {
+        if (!allPassed) {
             System.exit(1);
+        } else {
+            System.exit(0);
         }
     }
 }

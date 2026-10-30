@@ -4,6 +4,7 @@ import exception.AccountNotFoundException;
 import exception.BankException;
 import exception.InsufficientFundsException;
 import exception.InvalidAmountException;
+import exception.TransactionLoggingException;
 import model.Account;
 import model.BankInfo;
 import model.Command;
@@ -83,12 +84,13 @@ public class MiniBank {
         Path                 accountFile  = dataDir.resolve("accounts.dat");
         Path                 logsDir      = dataDir.resolve("logs");
         Path                 sequenceFile = dataDir.resolve("sequence.dat");
+        Path                 auditLogFile = dataDir.resolve("audit").resolve("audit.log");
         Path                 reportFile   = dataDir.resolve("reports").resolve("end-of-day-report.txt");
 
         // Recover monotonic account sequence across persisted accounts, transaction logs, and sequence tracker
         long highestId = BankService.recoverAndSyncAccountSequence(accountFile, logsDir, sequenceFile);
 
-        BankService          bankService  = new BankService(repository, processor, logsDir, sequenceFile);
+        BankService          bankService  = new BankService(repository, processor, logsDir, sequenceFile, auditLogFile);
 
         // Startup: Load persisted accounts into repository and shared processor registry
         if (Files.exists(accountFile)) {
@@ -163,7 +165,7 @@ public class MiniBank {
                     case STATEMENT    -> handleStatement(bankService, sc);
                     case LIST_ACCOUNTS -> handleListAccounts(bankService);
                     case REPORT       -> handleReport(logsDir, reportFile);
-                    case BATCH_PROCESS -> handleBatchProcess(bankService);
+                    case BATCH_PROCESS -> handleBatchProcess(bankService, sc);
                     case EXIT         -> { /* handled at loop exit */ }
                 }
 
@@ -1277,6 +1279,9 @@ public class MiniBank {
             }
             System.out.println("Account opened successfully! Account Number: " + acc.getAccountNumber()
                     + " | Balance: \u20b9" + acc.getBalance());
+        } catch (TransactionLoggingException e) {
+            System.out.println("Account opened successfully (Account Number: " + e.getAccountNumber()
+                    + " | Balance: \u20b9" + e.getCurrentBalance() + "), but initial logging failed: " + e.getMessage());
         } catch (BankException e) {
             System.out.println("Failed to open account: " + e.getMessage());
         }
@@ -1294,6 +1299,9 @@ public class MiniBank {
             bankService.deposit(accNum, amount);
             Account acc = bankService.getAccount(accNum);
             System.out.println("Deposit of \u20b9" + amount + " successful. New balance: \u20b9" + acc.getBalance());
+        } catch (TransactionLoggingException e) {
+            System.out.println("WARNING: Financial deposit succeeded (new balance: \u20b9" + e.getCurrentBalance()
+                    + "), but transaction logging failed: " + e.getMessage());
         } catch (BankException e) {
             System.out.println("Deposit rejected: " + e.getMessage());
         }
@@ -1313,6 +1321,9 @@ public class MiniBank {
             System.out.println("Withdrawal of \u20b9" + amount + " successful. New balance: \u20b9" + acc.getBalance());
         } catch (InsufficientFundsException e) {
             System.out.println("Withdrawal rejected \u2014 insufficient funds (shortfall: \u20b9" + e.getShortfall() + ").");
+        } catch (TransactionLoggingException e) {
+            System.out.println("WARNING: Financial withdrawal succeeded (new balance: \u20b9" + e.getCurrentBalance()
+                    + "), but transaction logging failed: " + e.getMessage());
         } catch (BankException e) {
             System.out.println("Withdrawal rejected: " + e.getMessage());
         }
@@ -1338,6 +1349,8 @@ public class MiniBank {
             System.out.println("  Destination balance : \u20b9" + dest.getBalance());
         } catch (InsufficientFundsException e) {
             System.out.println("Transfer rejected \u2014 insufficient funds (shortfall: \u20b9" + e.getShortfall() + ").");
+        } catch (TransactionLoggingException e) {
+            System.out.println("WARNING: Financial transfer succeeded, but transaction logging failed: " + e.getMessage());
         } catch (BankException e) {
             System.out.println("Transfer rejected: " + e.getMessage());
         }
@@ -1390,50 +1403,98 @@ public class MiniBank {
         }
     }
 
-    private static void handleBatchProcess(BankService bankService) {
+    private static void handleBatchProcess(BankService bankService, Scanner sc) {
         System.out.println("\n--- Process Batch Transactions ---");
         ArrayList<Account> accounts = bankService.listAccounts();
         if (accounts.isEmpty()) {
-            System.out.println("Opening two test accounts for the batch execution...");
-            try {
-                bankService.openSavingsAccount("BatchUser1", 5_000, 500);
-                bankService.openCurrentAccount("BatchUser2", 10_000, 2_000);
-                accounts = bankService.listAccounts();
-            } catch (BankException e) {
-                System.out.println("Could not create accounts for batch: " + e.getMessage());
-                return;
-            }
+            System.out.println("No accounts found in the repository. Please open an account first.");
+            return;
         }
 
-        Account target1 = accounts.get(0);
-        Account target2 = accounts.size() > 1 ? accounts.get(1) : target1;
+        System.out.println("Available Accounts:");
+        for (Account a : accounts) {
+            System.out.printf("  %s (%s) - Current Balance: \u20b9%d%n",
+                    a.getAccountNumber(), a.getOwnerName(), a.getBalance());
+        }
 
-        System.out.printf("Submitting concurrent batch: 10 deposits of \u20b950 to %s, 10 withdrawals of \u20b920 from %s...%n",
-                target1.getAccountNumber(), target2.getAccountNumber());
+        Integer count = promptInt(sc, "Enter number of transactions in batch: ");
+        if (count == null || count <= 0) {
+            System.out.println("Transaction count must be positive. Returning to menu.");
+            return;
+        }
 
         List<BatchTransaction> batch = new ArrayList<>();
-        for (int i = 0; i < 10; i++) {
-            batch.add(new BatchTransaction(target1.getAccountNumber(), TransactionType.DEPOSIT, 50));
-        }
-        for (int i = 0; i < 10; i++) {
-            batch.add(new BatchTransaction(target2.getAccountNumber(), TransactionType.WITHDRAW, 20));
+        for (int i = 1; i <= count; i++) {
+            System.out.printf("%n[Batch Item #%d of %d]%n", i, count);
+            System.out.println("Transaction Type: 1. Deposit | 2. Withdraw");
+            Integer typeChoice = promptInt(sc, "Select type (1-2): ");
+            if (typeChoice == null || (typeChoice != 1 && typeChoice != 2)) {
+                System.out.println("Invalid transaction type. Aborting batch entry.");
+                return;
+            }
+            TransactionType type = (typeChoice == 1) ? TransactionType.DEPOSIT : TransactionType.WITHDRAW;
+
+            String accNum = promptString(sc, "Enter Account Number: ");
+            if (accNum == null) {
+                System.out.println("Account number cannot be empty. Aborting batch entry.");
+                return;
+            }
+            try {
+                bankService.getAccount(accNum);
+            } catch (AccountNotFoundException e) {
+                System.out.println("Account validation failed: " + e.getMessage() + ". Aborting batch entry.");
+                return;
+            }
+
+            Long amount = promptLong(sc, "Enter Amount (\u20b9): ");
+            if (amount == null || amount <= 0) {
+                System.out.println("Amount must be positive. Aborting batch entry.");
+                return;
+            }
+
+            batch.add(new BatchTransaction(accNum, type, amount));
         }
 
+        System.out.printf("%nSubmitting %d transaction(s) to concurrent worker pool...%n", batch.size());
         BatchResult result = bankService.processBatch(batch);
-        System.out.println("\nBatch Execution Complete:");
-        System.out.println("  Total Submitted : " + result.getTotal());
+
+        System.out.println("\n========================================");
+        System.out.println("       BATCH EXECUTION SUMMARY");
+        System.out.println("========================================");
+        System.out.println("  Total Requested : " + result.getTotalRequested());
+        System.out.println("  Accepted        : " + result.getAccepted());
         System.out.println("  Succeeded       : " + result.getSucceeded());
         System.out.println("  Failed          : " + result.getFailed());
+        System.out.println("  Rejected        : " + result.getRejected());
+        System.out.println("  Completed Tasks : " + result.getCompleted());
+
         if (!result.getErrors().isEmpty()) {
-            System.out.println("  Errors:");
+            System.out.println("\n  Failures / Errors:");
             for (String err : result.getErrors()) {
                 System.out.println("    - " + err);
             }
         }
-        System.out.printf("  New balance (%s): \u20b9%d%n", target1.getAccountNumber(), target1.getBalance());
-        if (target1 != target2) {
-            System.out.printf("  New balance (%s): \u20b9%d%n", target2.getAccountNumber(), target2.getBalance());
+
+        System.out.println("\nUpdated Account Balances:");
+        for (Account a : bankService.listAccounts()) {
+            System.out.printf("  %s (%s): \u20b9%d%n", a.getAccountNumber(), a.getOwnerName(), a.getBalance());
         }
+        System.out.println("========================================");
+    }
+
+    private static Integer promptInt(Scanner sc, String prompt) {
+        System.out.print(prompt);
+        while (sc.hasNext()) {
+            if (sc.hasNextInt()) {
+                int val = sc.nextInt();
+                sc.nextLine(); // consume trailing newline
+                return val;
+            }
+            sc.next();
+            System.out.println("Invalid input! Please enter an integer.");
+            System.out.print(prompt);
+        }
+        return null;
     }
 
     private static String promptString(Scanner sc, String prompt) {

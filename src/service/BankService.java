@@ -3,6 +3,7 @@ package service;
 import exception.AccountNotFoundException;
 import exception.BankException;
 import exception.InvalidAmountException;
+import exception.TransactionLoggingException;
 import model.Account;
 import model.CurrentAccount;
 import model.FixedDepositAccount;
@@ -30,9 +31,10 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * Core banking service integrating repository persistence, transaction processing,
@@ -46,20 +48,46 @@ public class BankService {
     private final Path                 auditLogFile;
     private final Path                 sequenceFile;
 
-    public BankService(Repository<Account> repository, TransactionProcessor processor, Path logsDir, Path sequenceFile) {
+    public BankService(Repository<Account> repository, TransactionProcessor processor,
+                       Path logsDir, Path sequenceFile, Path auditLogFile) {
         this.repository   = Objects.requireNonNull(repository, "repository must not be null");
         this.processor    = Objects.requireNonNull(processor, "processor must not be null");
         this.logsDir      = logsDir != null ? logsDir : Paths.get("data", "logs");
-        this.auditLogFile = Paths.get("data", "audit", "audit.log");
         this.sequenceFile = sequenceFile != null ? sequenceFile : Paths.get("data", "sequence.dat");
+        this.auditLogFile = auditLogFile != null ? auditLogFile : Paths.get("data", "audit", "audit.log");
+    }
+
+    public BankService(Repository<Account> repository, TransactionProcessor processor,
+                       Path logsDir, Path sequenceFile) {
+        this(repository, processor, logsDir, sequenceFile, Paths.get("data", "audit", "audit.log"));
     }
 
     public BankService(Repository<Account> repository, TransactionProcessor processor, Path logsDir) {
-        this(repository, processor, logsDir, Paths.get("data", "sequence.dat"));
+        this(repository, processor, logsDir, Paths.get("data", "sequence.dat"), Paths.get("data", "audit", "audit.log"));
     }
 
     public BankService(Repository<Account> repository, TransactionProcessor processor) {
-        this(repository, processor, Paths.get("data", "logs"), Paths.get("data", "sequence.dat"));
+        this(repository, processor, Paths.get("data", "logs"), Paths.get("data", "sequence.dat"), Paths.get("data", "audit", "audit.log"));
+    }
+
+    public TransactionProcessor getProcessor() {
+        return processor;
+    }
+
+    public Repository<Account> getRepository() {
+        return repository;
+    }
+
+    public Path getAuditLogFile() {
+        return auditLogFile;
+    }
+
+    public Path getLogsDir() {
+        return logsDir;
+    }
+
+    public Path getSequenceFile() {
+        return sequenceFile;
     }
 
     // -------------------------------------------------------------------------
@@ -241,51 +269,120 @@ public class BankService {
     // Batch processing
     // -------------------------------------------------------------------------
 
+    private static class BatchOutcome {
+        final BatchTransaction tx;
+        final boolean success;
+        final String errorMessage;
+
+        BatchOutcome(BatchTransaction tx, boolean success, String errorMessage) {
+            this.tx = tx;
+            this.success = success;
+            this.errorMessage = errorMessage;
+        }
+
+        static BatchOutcome success(BatchTransaction tx) {
+            return new BatchOutcome(tx, true, null);
+        }
+
+        static BatchOutcome failure(BatchTransaction tx, String msg) {
+            return new BatchOutcome(tx, false, msg);
+        }
+    }
+
     /**
      * Executes a batch of transaction instructions concurrently using the
-     * shared TransactionProcessor. Waits for all tasks to complete before returning.
+     * shared TransactionProcessor.
+     *
+     * <p>Features:
+     * <ul>
+     *   <li>Every accepted transaction yields a completion result.</li>
+     *   <li>Submissions rejected by executor shutdown or saturation are tracked separately in {@code rejected}.</li>
+     *   <li>Guarantees {@code totalRequested = accepted + rejected} and {@code completed = succeeded + failed = accepted}.</li>
+     *   <li>Awaits all accepted tasks before returning so no uncompleted worker task remains running.</li>
+     *   <li>Preserves caller thread interrupt status.</li>
+     * </ul>
      */
     public BatchResult processBatch(List<BatchTransaction> batch) {
         if (batch == null || batch.isEmpty()) {
-            return new BatchResult(0, 0, 0, List.of());
+            return new BatchResult(0, 0, 0, 0, 0, List.of());
         }
 
-        CountDownLatch latch = new CountDownLatch(batch.size());
-        AtomicInteger succeeded = new AtomicInteger();
-        AtomicInteger failed = new AtomicInteger();
+        int totalRequested = batch.size();
+        int rejected = 0;
+        List<Future<BatchOutcome>> futures = new ArrayList<>(totalRequested);
         List<String> errors = Collections.synchronizedList(new ArrayList<>());
 
+        // Phase 1: Submit tasks; separately count rejections without hanging
         for (BatchTransaction tx : batch) {
-            processor.submit(() -> {
-                try {
-                    switch (tx.getType()) {
-                        case DEPOSIT  -> deposit(tx.getAccountNumber(), tx.getAmount());
-                        case WITHDRAW -> withdraw(tx.getAccountNumber(), tx.getAmount());
-                        default       -> throw new UnsupportedOperationException(
-                                "Unsupported batch transaction type: " + tx.getType());
+            try {
+                Callable<BatchOutcome> task = () -> {
+                    try {
+                        switch (tx.getType()) {
+                            case DEPOSIT  -> deposit(tx.getAccountNumber(), tx.getAmount());
+                            case WITHDRAW -> withdraw(tx.getAccountNumber(), tx.getAmount());
+                            default       -> throw new UnsupportedOperationException(
+                                    "Unsupported batch transaction type: " + tx.getType());
+                        }
+                        return BatchOutcome.success(tx);
+                    } catch (Exception e) {
+                        return BatchOutcome.failure(tx, e.getMessage());
                     }
-                    succeeded.incrementAndGet();
-                } catch (Exception e) {
-                    failed.incrementAndGet();
-                    errors.add(String.format("[%s %s ₹%d]: %s",
-                            tx.getAccountNumber(), tx.getType(), tx.getAmount(), e.getMessage()));
-                } finally {
-                    latch.countDown();
-                }
-            });
-        }
-
-        try {
-            boolean finished = latch.await(60, TimeUnit.SECONDS);
-            if (!finished) {
-                errors.add("Batch processing timed out after 60 seconds.");
+                };
+                futures.add(processor.submit(task));
+            } catch (RejectedExecutionException | IllegalStateException e) {
+                rejected++;
+                errors.add(String.format("Submission rejected for [%s %s ₹%d]: %s",
+                        tx.getAccountNumber(), tx.getType(), tx.getAmount(), e.getMessage()));
             }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            errors.add("Batch processing thread was interrupted.");
         }
 
-        return new BatchResult(batch.size(), succeeded.get(), failed.get(), errors);
+        int accepted = futures.size();
+        int succeeded = 0;
+        int failed = 0;
+        boolean wasInterrupted = false;
+
+        // Phase 2: Await completion of all accepted tasks without busy-waiting or sleep
+        for (Future<BatchOutcome> f : futures) {
+            try {
+                BatchOutcome outcome = f.get();
+                if (outcome.success) {
+                    succeeded++;
+                } else {
+                    failed++;
+                    errors.add(String.format("[%s %s ₹%d]: %s",
+                            outcome.tx.getAccountNumber(), outcome.tx.getType(), outcome.tx.getAmount(), outcome.errorMessage));
+                }
+            } catch (InterruptedException e) {
+                wasInterrupted = true;
+                failed++;
+                errors.add("Batch transaction execution was interrupted.");
+            } catch (ExecutionException e) {
+                failed++;
+                Throwable cause = e.getCause() != null ? e.getCause() : e;
+                errors.add("Worker execution exception: " + cause.getMessage());
+            } catch (Exception e) {
+                failed++;
+                errors.add("Unexpected batch error: " + e.getMessage());
+            }
+        }
+
+        // Phase 3: Ensure no accepted task remains running upon return even if interrupted
+        if (wasInterrupted) {
+            for (Future<BatchOutcome> f : futures) {
+                while (!f.isDone()) {
+                    try {
+                        f.get();
+                    } catch (InterruptedException ignored) {
+                        // drain
+                    } catch (Exception ignored) {
+                        break;
+                    }
+                }
+            }
+            Thread.currentThread().interrupt();
+        }
+
+        return new BatchResult(totalRequested, accepted, succeeded, failed, rejected, errors);
     }
 
     // -------------------------------------------------------------------------
@@ -296,9 +393,22 @@ public class BankService {
         if (accountNumber == null || accountNumber.isBlank()) {
             throw new AccountNotFoundException("Account number cannot be null or blank.");
         }
-        Account account = repository.findById(accountNumber.trim());
+        String id = accountNumber.trim();
+        // Resolve through thread-safe concurrent registry first for worker coordination,
+        // synchronizing with repository if absent to ensure reference identity.
+        Account account = processor.getAccount(id);
         if (account == null) {
-            throw new AccountNotFoundException("Account not found: " + accountNumber.trim());
+            account = repository.findById(id);
+            if (account != null) {
+                try {
+                    processor.registerAccount(account);
+                } catch (IllegalStateException ignored) {
+                    account = processor.getAccount(id);
+                }
+            }
+        }
+        if (account == null) {
+            throw new AccountNotFoundException("Account not found: " + id);
         }
         return account;
     }
@@ -462,22 +572,52 @@ public class BankService {
         return logsDir.resolve("transactions-" + today + ".log");
     }
 
-    private void logTransaction(String accountNumber, TransactionType type, long amount) {
+    private void logTransaction(String accountNumber, TransactionType type, long amount)
+            throws TransactionLoggingException {
+        Account account = processor.getAccount(accountNumber);
+        if (account == null) {
+            account = repository.findById(accountNumber);
+        }
+        long currentBal = account != null ? account.getBalance() : -1;
         try {
             String ts = Instant.now().truncatedTo(ChronoUnit.SECONDS).toString();
             String entry = ts + "|" + accountNumber + "|" + type + "|" + amount;
             TransactionLog.append(getDailyLogFile(), entry);
         } catch (IOException e) {
-            System.err.println("Warning: Failed to append to transaction log: " + e.getMessage());
+            throw new TransactionLoggingException(
+                    "Financial operation succeeded (balance: ₹" + currentBal + "), but transaction logging failed: " + e.getMessage(),
+                    accountNumber, currentBal, e);
+        }
+    }
+
+    private static class TransactionLogEntry implements Comparable<TransactionLogEntry> {
+        final Instant timestamp;
+        final long orderIndex;
+        final String formattedLine;
+
+        TransactionLogEntry(Instant timestamp, long orderIndex, String formattedLine) {
+            this.timestamp = timestamp;
+            this.orderIndex = orderIndex;
+            this.formattedLine = formattedLine;
+        }
+
+        @Override
+        public int compareTo(TransactionLogEntry other) {
+            int cmp = this.timestamp.compareTo(other.timestamp);
+            if (cmp != 0) {
+                return cmp;
+            }
+            return Long.compare(this.orderIndex, other.orderIndex);
         }
     }
 
     private List<String> readAccountTransactions(String accountNumber) {
-        List<String> list = new ArrayList<>();
+        List<TransactionLogEntry> entries = new ArrayList<>();
         if (!Files.exists(logsDir)) {
-            return list;
+            return List.of();
         }
 
+        long orderIndex = 0L;
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(logsDir, "*.log")) {
             for (Path logPath : stream) {
                 if (logPath.getFileName().toString().equals("audit.log")) {
@@ -493,15 +633,31 @@ public class BankService {
                             continue;
                         }
                         String[] parts = line.split("\\|", -1);
-                        if (parts.length == 4 && parts[1].trim().equals(accountNumber)) {
-                            list.add(String.format("%-22s  %-10s  ₹%-12s",
-                                    parts[0].trim(), parts[2].trim(), parts[3].trim()));
+                        if (parts.length >= 4 && parts[1].trim().equals(accountNumber)) {
+                            String tsStr = parts[0].trim();
+                            Instant ts;
+                            try {
+                                ts = Instant.parse(tsStr);
+                            } catch (Exception ignored) {
+                                ts = Instant.EPOCH;
+                            }
+                            String formatted = String.format("%-22s  %-10s  ₹%-12s",
+                                    tsStr, parts[2].trim(), parts[3].trim());
+                            entries.add(new TransactionLogEntry(ts, orderIndex++, formatted));
                         }
                     }
+                } catch (IOException e) {
+                    System.err.println("Warning: Error reading account transaction log file " + logPath + ": " + e.getMessage());
                 }
             }
         } catch (IOException e) {
             System.err.println("Warning: Error reading account transaction logs: " + e.getMessage());
+        }
+
+        Collections.sort(entries);
+        List<String> list = new ArrayList<>(entries.size());
+        for (TransactionLogEntry e : entries) {
+            list.add(e.formattedLine);
         }
         return list;
     }
@@ -518,7 +674,7 @@ public class BankService {
                     break;
                 }
             }
-            if (hasAudit) {
+            if (hasAudit && auditLogFile != null) {
                 String ts = Instant.now().truncatedTo(ChronoUnit.SECONDS).toString();
                 String auditEntry = String.format("%s [AUDIT] method=%s target=%s details={%s}",
                         ts, methodName, target, details);

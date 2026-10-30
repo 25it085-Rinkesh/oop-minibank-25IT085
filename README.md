@@ -179,17 +179,22 @@ MiniBank includes a comprehensive JUnit 5 test suite in `test/service/BankServic
 ### Run tests using PowerShell:
 ```powershell
 # 1. Compile production sources into build/
-javac -encoding UTF-8 -d build $(Get-ChildItem -Recurse -Filter "*.java" -Path src | Select-Object -ExpandProperty FullName)
+New-Item -ItemType Directory -Force .\build | Out-Null
+$sourceFiles = Get-ChildItem .\src -Recurse -Filter "*.java" | Select-Object -ExpandProperty FullName
+javac -encoding UTF-8 -d .\build $sourceFiles
+if ($LASTEXITCODE -ne 0) { throw "Production compilation failed." }
 
 # 2. Compile tests into out/test/
-New-Item -ItemType Directory -Force out\test | Out-Null
-javac -encoding UTF-8 -cp "lib/test/*;build" -d out\test $(Get-ChildItem -Recurse -Filter "*.java" -Path test | Select-Object -ExpandProperty FullName)
+New-Item -ItemType Directory -Force .\out\test | Out-Null
+$testFiles = Get-ChildItem .\test -Recurse -Filter "*.java" | Select-Object -ExpandProperty FullName
+javac -encoding UTF-8 -cp "lib/test/*;build" -d .\out\test $testFiles
+if ($LASTEXITCODE -ne 0) { throw "Test compilation failed." }
 
 # 3. Execute the JUnit 5 test runner
 java -cp "lib/test/*;build;out/test" test.TestRunner
 ```
 
-### Verified Test Cases:
+### Verified Test Cases (24 Passed):
 1. `testDepositIncreasesBalance`: Validates balance increases correctly upon deposit.
 2. `testWithdrawalBeyondAllowedLimit`: Validates `InsufficientFundsException` and shortfall when exceeding limits.
 3. `testConcurrentDeposits`: Concurrently executes 100 deposits of ₹25 each on one account, verifying the exact final balance.
@@ -201,24 +206,44 @@ java -cp "lib/test/*;build;out/test" test.TestRunner
 9. `testRepositoryLookupAfterAccountCreation`: Confirms immediate repository discovery and object reference identity.
 10. `testMonotonicAccountSequenceRecovery`: Validates durable, monotonic recovery from existing logs and sequence tracking files across JVM restarts.
 11. `testAccountStatementContainsOnlyTargetAccountTransactions`: Confirms complete isolation of account statements, preventing cross-account transaction history contamination.
+12. `testAuditLogIsolationAndProductionImmutability`: Proves test audit records are isolated to temporary directories and production `data/audit/audit.log` remains strictly immutable (SHA-256 verified).
+13. `testSuccessfulBatchProcessing`: Verifies concurrent batch deposit and withdrawal execution with accurate final balances.
+14. `testBatchContainingFailedTransactions`: Asserts worker exceptions (e.g. overdraft limit breach, missing account) are captured individually without aborting the batch.
+15. `testBatchExecutorRejection`: Verifies stopped/saturated executor cleanly marks tasks as rejected rather than hanging or claiming false success.
+16. `testBatchInterruptionHandling`: Confirms interrupt status is properly preserved on the caller thread upon batch completion.
+17. `testEmptyAndNullBatch`: Validates graceful zero-count return for empty and null batch lists.
+18. `testBatchAccurateFinalCounts`: Validates core accounting invariants: `total = accepted + rejected`, `completed = succeeded + failed`, and `accepted == completed`.
+19. `testRepositoryAndRegistryReferenceIdentity`: Proves `Repository` and `TransactionProcessor` resolve the exact same object reference (`assertSame`).
+20. `testDuplicateAccountRegistrationRejected`: Ensures registering an already-registered account into the processor throws `IllegalStateException`.
+21. `testRestoredAccountsAvailableToBatchProcessing`: Confirms deserialized accounts loaded into repository and registry are immediately accessible for concurrent batch execution.
+22. `testAccountStatementChronologicalSortingMultipleFiles`: Validates chronological statement ordering across multiple distinct daily log files.
+23. `testTransactionLogWriteErrorPropagatedHonestly`: Proves I/O logging errors throw `TransactionLoggingException` while preserving successful financial state changes without silent swallowing or duplicate execution.
+24. `testComprehensiveSequenceRecoveryAcrossAllSources`: Validates monotonic sequence discovery across historical logs, serialized state, and durable sequence tracker without touching production files.
 
 ---
 
 ## 10. How to Build the Runnable JAR
 
-To package the entire production application into `dist/MiniBank.jar`:
+To package the entire production application into `dist/MiniBank.jar` on a fresh clone without relying on untracked `META-INF` directories:
 
 ```powershell
-# Clean and create build directory
-Remove-Item -Recurse -Force build -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force build | Out-Null
+# 1. Clean previous build artifacts and ensure target directories exist
+Remove-Item -Recurse -Force .\build -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force .\build, .\dist | Out-Null
 
-# Compile all production Java sources
-javac -encoding UTF-8 -d build $(Get-ChildItem -Recurse -Filter "*.java" -Path src | Select-Object -ExpandProperty FullName)
+# 2. Compile all production Java sources
+$sourceFiles = Get-ChildItem .\src -Recurse -Filter "*.java" |
+    Select-Object -ExpandProperty FullName
 
-# Package into runnable JAR with manifest
-New-Item -ItemType Directory -Force dist -ErrorAction SilentlyContinue | Out-Null
-jar cfm dist\MiniBank.jar META-INF\MANIFEST.MF -C build .
+javac -encoding UTF-8 -d .\build $sourceFiles
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Production compilation failed."
+}
+
+# 3. Create runnable JAR with automatic Main-Class manifest generation
+jar --create --file .\dist\MiniBank.jar `
+    --main-class service.MiniBank -C .\build .
 ```
 
 ---

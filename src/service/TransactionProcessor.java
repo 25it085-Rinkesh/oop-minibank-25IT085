@@ -4,9 +4,12 @@ import model.Account;
 
 import java.util.ArrayList;
 import java.util.Objects;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -35,17 +38,44 @@ public class TransactionProcessor {
      * Submits a task for execution on the thread pool.
      *
      * @param task the runnable task to execute; must not be null
-     * @throws NullPointerException  if task is null
-     * @throws IllegalStateException if the executor has already been shut down
+     * @return a Future representing pending completion of the task
+     * @throws NullPointerException       if task is null
+     * @throws RejectedExecutionException if the executor has already been shut down
      */
-    public void submit(Runnable task) {
+    public Future<?> submit(Runnable task) {
         if (task == null) {
             throw new NullPointerException("task must not be null");
         }
         if (executor.isShutdown()) {
-            throw new IllegalStateException("TransactionProcessor has been shut down");
+            throw new RejectedExecutionException("TransactionProcessor has been shut down");
         }
-        executor.execute(task);
+        return executor.submit(task);
+    }
+
+    /**
+     * Submits a value-returning task for execution on the thread pool.
+     *
+     * @param task the callable task to execute; must not be null
+     * @param <T>  the result type
+     * @return a Future representing pending completion of the task
+     * @throws NullPointerException       if task is null
+     * @throws RejectedExecutionException if the executor has already been shut down
+     */
+    public <T> Future<T> submit(Callable<T> task) {
+        if (task == null) {
+            throw new NullPointerException("task must not be null");
+        }
+        if (executor.isShutdown()) {
+            throw new RejectedExecutionException("TransactionProcessor has been shut down");
+        }
+        return executor.submit(task);
+    }
+
+    /**
+     * Returns true if this processor has been shut down.
+     */
+    public boolean isShutdown() {
+        return executor.isShutdown();
     }
 
     /**
@@ -100,6 +130,19 @@ public class TransactionProcessor {
             throw new IllegalArgumentException("accountNumber must not be null or blank");
         }
         return sharedAccounts.get(accountNumber);
+    }
+
+    /**
+     * Removes an account from the shared registry.
+     *
+     * @param accountNumber non-blank account number to remove
+     * @return the removed Account or null if absent
+     */
+    public Account removeAccount(String accountNumber) {
+        if (accountNumber == null || accountNumber.isBlank()) {
+            return null;
+        }
+        return sharedAccounts.remove(accountNumber.trim());
     }
 
     /**

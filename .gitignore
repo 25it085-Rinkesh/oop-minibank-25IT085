@@ -3,6 +3,8 @@ out/
 !**/src/main/**/out/
 !**/src/test/**/out/
 .kotlin
+.idea/
+*.iml
 
 ### Eclipse ###
 .apt_generated
@@ -19,7 +21,6 @@ bin/
 ### NetBeans ###
 /nbproject/private/
 /nbbuild/
-/dist/
 /nbdist/
 /.nb-gradle/
 
@@ -28,3 +29,18 @@ bin/
 
 ### Mac OS ###
 .DS_Store
+
+### MiniBank Build & Temp Directories ###
+/build/
+/out/
+/tmpbin*/
+/data/
+/META-INF/
+/dist/META-INF/
+
+### Preserve Tracked Distribution and Test Libraries ###
+!/dist/
+!/dist/MiniBank.jar
+!/lib/
+!/lib/test/
+!/lib/test/*.jar
