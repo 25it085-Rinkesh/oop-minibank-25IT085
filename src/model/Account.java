@@ -95,14 +95,18 @@ public abstract class Account implements Transactable, InterestBearing {
     /**
      * Transfers {@code amount} from this account to {@code to}.
      *
+     * <p>Locks are always acquired in account-number order (lexicographically
+     * smaller account number first) to prevent deadlock when two threads
+     * transfer between the same pair of accounts simultaneously.
+     *
      * <p>If the source is debited but the destination credit fails, the source
      * is credited back (rollback). Any rollback failure is attached as a
      * suppressed exception before rethrowing.
      *
-     * @throws AccountNotFoundException if {@code to} is null or this == to
-     * @throws InvalidAmountException   if {@code amount <= 0}
+     * @throws AccountNotFoundException   if {@code to} is null or this == to
+     * @throws InvalidAmountException     if {@code amount <= 0}
      * @throws InsufficientFundsException if this account cannot cover the withdrawal
-     * @throws BankException            for any other bank-side failure
+     * @throws BankException              for any other bank-side failure
      */
     public void transfer(Account to, long amount) throws BankException {
         if (to == null) {
@@ -119,34 +123,51 @@ public abstract class Account implements Transactable, InterestBearing {
                     "Transfer amount must be positive, but was: " + amount);
         }
 
-        // Pre-check: destination must be able to accept the funds.
-        // Safe overflow check: amount > 0, so Long.MAX_VALUE - amount is representable.
-        if (to.getBalance() > Long.MAX_VALUE - amount) {
-            throw new InvalidAmountException(
-                    "Transfer of " + amount + " would overflow the destination account balance.");
+        // Consistent lock ordering: always lock the account with the
+        // lexicographically smaller account number first. This eliminates
+        // the circular-wait condition that causes deadlock.
+        Account first;
+        Account second;
+        if (this.accountNumber.compareTo(to.accountNumber) <= 0) {
+            first  = this;
+            second = to;
+        } else {
+            first  = to;
+            second = this;
         }
 
-        boolean debited = false;
+        synchronized (first) {
+            synchronized (second) {
+                // Pre-check: destination must be able to accept the funds.
+                // Safe overflow check: amount > 0, so Long.MAX_VALUE - amount is representable.
+                if (to.balance > Long.MAX_VALUE - amount) {
+                    throw new InvalidAmountException(
+                            "Transfer of " + amount + " would overflow the destination account balance.");
+                }
 
-        try {
-            withdraw(amount);
-            debited = true;
-            to.deposit(amount);
-        } catch (BankException e) {
-            if (debited) {
-                // Rollback: credit the amount back to the source.
+                boolean debited = false;
+
                 try {
-                    deposit(amount);
-                } catch (InvalidAmountException rollbackEx) {
-                    // Rollback itself failed â€” attach as suppressed so the
-                    // original failure is still the primary exception.
-                    e.addSuppressed(rollbackEx);
+                    withdraw(amount);
+                    debited = true;
+                    to.deposit(amount);
+                } catch (BankException e) {
+                    if (debited) {
+                        // Rollback: credit the amount back to the source.
+                        try {
+                            deposit(amount);
+                        } catch (InvalidAmountException rollbackEx) {
+                            // Rollback itself failed — attach as suppressed so the
+                            // original failure is still the primary exception.
+                            e.addSuppressed(rollbackEx);
+                        }
+                    }
+                    throw e;
+                } finally {
+                    // In a production system this block would flush a transaction log
+                    // or release a distributed lock held for the duration of the transfer.
                 }
             }
-            throw e;
-        } finally {
-            // In a production system this block would flush a transaction log
-            // or release a distributed lock held for the duration of the transfer.
         }
     }
 

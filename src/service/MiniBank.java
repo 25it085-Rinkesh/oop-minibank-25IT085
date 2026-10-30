@@ -18,7 +18,11 @@ import util.StatementFormatter;
 import util.Validator;
 import util.AnnotationValidator;
 
+import java.lang.management.ManagementFactory;
+import java.lang.management.ThreadMXBean;
 import java.util.Scanner;
+import java.util.concurrent.CountDownLatch;
+import model.TransactionType;
 
 import static util.Validator.isValidMobile;
 
@@ -118,6 +122,9 @@ public class MiniBank {
         demoAnnotationValidation();
         demoTransfers();
         demoConcurrentDeposits();
+        demoTransactionProcessor();
+        demoProducerConsumer();
+        demoDeadlockPrevention();
     }
 
 
@@ -594,5 +601,234 @@ public class MiniBank {
             }
         }
         return false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Practical 10 demonstrations
+    // -------------------------------------------------------------------------
+
+    private static void demoTransactionProcessor() {
+        System.out.println("\n" + SEP);
+        System.out.println("Transaction Processor (Fixed Thread Pool)");
+        System.out.println(SEP);
+
+        final long INITIAL_BALANCE    = 10_000L;
+        final int  DEPOSIT_TASKS      = 100;
+        final long DEPOSIT_AMOUNT     = 10L;
+        final int  WITHDRAWAL_TASKS   = 50;
+        final long WITHDRAWAL_AMOUNT  = 5L;
+
+        SavingsAccount shared = new SavingsAccount("PoolDemo", INITIAL_BALANCE, 0);
+        TransactionProcessor processor = new TransactionProcessor();
+
+        for (int i = 0; i < DEPOSIT_TASKS; i++) {
+            processor.submit(new AccountTransactionTask(shared, TransactionType.DEPOSIT, DEPOSIT_AMOUNT));
+        }
+        for (int i = 0; i < WITHDRAWAL_TASKS; i++) {
+            processor.submit(new AccountTransactionTask(shared, TransactionType.WITHDRAW, WITHDRAWAL_AMOUNT));
+        }
+
+        processor.stop();   // waits for all tasks to complete
+
+        long expected = INITIAL_BALANCE
+                + (long) DEPOSIT_TASKS    * DEPOSIT_AMOUNT
+                - (long) WITHDRAWAL_TASKS * WITHDRAWAL_AMOUNT;
+        long actual   = shared.getBalance();
+
+        System.out.println("Thread pool size  : 4");
+        System.out.println("Deposit  tasks    : " + DEPOSIT_TASKS + " × ₹" + DEPOSIT_AMOUNT);
+        System.out.println("Withdrawal tasks  : " + WITHDRAWAL_TASKS + " × ₹" + WITHDRAWAL_AMOUNT);
+        System.out.println("Expected balance  : ₹" + expected);
+        System.out.println("Actual   balance  : ₹" + actual);
+        System.out.println("Result            : " + (actual == expected ? "PASS" : "FAIL"));
+    }
+
+    private static void demoProducerConsumer() {
+        System.out.println("\n" + SEP);
+        System.out.println("Producer-Consumer (wait/notify)");
+        System.out.println(SEP);
+
+        final int  DEPOSIT_COUNT     = 10;
+        final long DEPOSIT_AMT       = 200L;
+        final int  WITHDRAW_COUNT    = 4;
+        final long WITHDRAW_AMT      = 150L;
+        final long INITIAL_BALANCE   = 1_000L;
+
+        SavingsAccount shared = new SavingsAccount("PCDemo", INITIAL_BALANCE, 0);
+        TransactionBuffer buffer = new TransactionBuffer();
+
+        long expectedBalance = INITIAL_BALANCE
+                + (long) DEPOSIT_COUNT  * DEPOSIT_AMT
+                - (long) WITHDRAW_COUNT * WITHDRAW_AMT;
+
+        Thread producer = new Thread(() -> {
+            System.out.println("[Producer] started.");
+            try {
+                for (int i = 0; i < DEPOSIT_COUNT; i++) {
+                    buffer.produce(TransactionType.DEPOSIT, DEPOSIT_AMT);
+                }
+                for (int i = 0; i < WITHDRAW_COUNT; i++) {
+                    buffer.produce(TransactionType.WITHDRAW, WITHDRAW_AMT);
+                }
+                System.out.println("[Producer] produced " + (DEPOSIT_COUNT + WITHDRAW_COUNT) + " transactions.");
+                buffer.producePoison();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                System.err.println("[Producer] interrupted.");
+            }
+        }, "PC-Producer");
+
+        Thread consumer = new Thread(() -> {
+            System.out.println("[Consumer] started.");
+            int processed = 0;
+            try {
+                while (true) {
+                    long[] item = buffer.consume();
+                    if (item[1] == TransactionBuffer.POISON_AMOUNT) {
+                        break;
+                    }
+                    TransactionType type = TransactionType.values()[(int) item[0]];
+                    long amount = item[1];
+                    try {
+                        if (type == TransactionType.DEPOSIT) {
+                            shared.deposit(amount);
+                        } else {
+                            shared.withdraw(amount);
+                        }
+                        processed++;
+                    } catch (exception.BankException e) {
+                        System.err.println("[Consumer] transaction failed: " + e.getMessage());
+                    }
+                }
+                System.out.println("[Consumer] processed " + processed + " transactions.");
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                System.err.println("[Consumer] interrupted.");
+            }
+        }, "PC-Consumer");
+
+        producer.start();
+        consumer.start();
+
+        try {
+            producer.join();
+            consumer.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            System.err.println("Main thread interrupted while joining producer/consumer.");
+        }
+
+        long actual = shared.getBalance();
+        System.out.println("Expected balance  : ₹" + expectedBalance);
+        System.out.println("Actual   balance  : ₹" + actual);
+        System.out.println("Result            : " + (actual == expectedBalance ? "PASS" : "FAIL"));
+    }
+
+    private static void demoDeadlockPrevention() {
+        System.out.println("\n" + SEP);
+        System.out.println("Deadlock Prevention (Ordered Locks)");
+        System.out.println(SEP);
+
+        // --- Part A: demonstrate deadlock with opposite lock ordering ---
+        SavingsAccount acctA = new SavingsAccount("DeadlockA", 5_000, 0);
+        SavingsAccount acctB = new SavingsAccount("DeadlockB", 5_000, 0);
+
+        CountDownLatch bothHoldFirst = new CountDownLatch(2);
+        boolean deadlockDetected = false;
+
+        // t1: locks acctA then tries acctB
+        Thread t1 = new Thread(() -> {
+            synchronized (acctA) {
+                bothHoldFirst.countDown();
+                try { bothHoldFirst.await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+                synchronized (acctB) { /* never reached in deadlock */ }
+            }
+        }, "DeadlockThread-1");
+
+        // t2: locks acctB then tries acctA
+        Thread t2 = new Thread(() -> {
+            synchronized (acctB) {
+                bothHoldFirst.countDown();
+                try { bothHoldFirst.await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+                synchronized (acctA) { /* never reached in deadlock */ }
+            }
+        }, "DeadlockThread-2");
+
+        t1.setDaemon(true);
+        t2.setDaemon(true);
+        t1.start();
+        t2.start();
+
+        // Give threads time to reach the deadlock state
+        try { Thread.sleep(400); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+
+        ThreadMXBean mxBean = ManagementFactory.getThreadMXBean();
+        long[] deadlocked = mxBean.findDeadlockedThreads();
+        if (deadlocked != null && deadlocked.length >= 2) {
+            deadlockDetected = true;
+        }
+
+        System.out.println("Unsafe lock ordering deadlock detected : " + (deadlockDetected ? "YES" : "NO (timing-dependent)"));
+
+        // Daemon threads will be killed when the JVM exits; no cleanup needed.
+
+        // --- Part B: fix with ordered locks — repeated opposing transfers ---
+        final long BALANCE_EACH  = 50_000L;
+        final long TRANSFER_AMT  = 10L;
+        final int  ITERATIONS    = 5_000;
+
+        SavingsAccount ordA = new SavingsAccount("OrderedA", BALANCE_EACH, 0);
+        SavingsAccount ordB = new SavingsAccount("OrderedB", BALANCE_EACH, 0);
+
+        long combinedBefore = ordA.getBalance() + ordB.getBalance();
+
+        boolean[] transferError = { false };
+
+        Thread fa = new Thread(() -> {
+            for (int i = 0; i < ITERATIONS; i++) {
+                try {
+                    ordA.transfer(ordB, TRANSFER_AMT);
+                } catch (exception.BankException e) {
+                    // Insufficient funds during opposing transfer is benign;
+                    // a genuine unexpected exception is flagged.
+                    if (!(e instanceof exception.InsufficientFundsException)) {
+                        transferError[0] = true;
+                        System.err.println("[OrderedTransfer-A] unexpected: " + e.getMessage());
+                    }
+                }
+            }
+        }, "OrderedTransfer-A");
+
+        Thread fb = new Thread(() -> {
+            for (int i = 0; i < ITERATIONS; i++) {
+                try {
+                    ordB.transfer(ordA, TRANSFER_AMT);
+                } catch (exception.BankException e) {
+                    if (!(e instanceof exception.InsufficientFundsException)) {
+                        transferError[0] = true;
+                        System.err.println("[OrderedTransfer-B] unexpected: " + e.getMessage());
+                    }
+                }
+            }
+        }, "OrderedTransfer-B");
+
+        fa.start();
+        fb.start();
+
+        try {
+            fa.join(10_000);
+            fb.join(10_000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
+        boolean bothFinished = !fa.isAlive() && !fb.isAlive();
+        long combinedAfter   = ordA.getBalance() + ordB.getBalance();
+        boolean sumPreserved = (combinedAfter == combinedBefore);
+
+        System.out.println("Ordered-lock transfer threads finished : " + (bothFinished ? "YES" : "NO (still alive — possible deadlock)"));
+        System.out.println("Combined balance preserved             : " + (sumPreserved ? "PASS (₹" + combinedAfter + ")" : "FAIL (₹" + combinedAfter + ")"));
+        System.out.println("No unexpected transfer exception       : " + (!transferError[0] ? "PASS" : "FAIL"));
+        System.out.println("Deadlock prevention result            : " + (bothFinished && sumPreserved && !transferError[0] ? "PASS" : "FAIL"));
     }
 }
