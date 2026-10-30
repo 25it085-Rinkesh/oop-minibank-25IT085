@@ -30,6 +30,7 @@ import java.util.Collections;
 import java.util.Scanner;
 import java.util.concurrent.CountDownLatch;
 import model.TransactionType;
+import repository.Repository;
 import util.ReportGenerator;
 import util.StatePersister;
 import util.TransactionLog;
@@ -137,6 +138,7 @@ public class MiniBank {
         demoDeadlockPrevention();
         demoPersistenceAndReporting();
         demoAccountStore();
+        demoGenericRepository();
     }
 
 
@@ -1080,5 +1082,74 @@ public class MiniBank {
                 exp2, shared2.getBalance(), shared2.getBalance() == exp2 ? "PASS" : "FAIL");
         System.out.println("Registry size     : " + proc.getAllAccounts().size()
                 + " unique accounts");
+    }
+
+    // -------------------------------------------------------------------------
+    // Practical 13 — Generic Repository, Reflection, Bounded Type Parameters
+    // -------------------------------------------------------------------------
+
+    private static void demoGenericRepository() {
+        System.out.println("\n" + SEP);
+        System.out.println("Generic Repository (Reflection & Bounded Generics)");
+        System.out.println(SEP);
+
+        // --- A. Create accounts & generic repository ---
+        Repository<Account> repository = new Repository<>();
+
+        SavingsAccount      sa1 = new SavingsAccount("Meera", 4_500, 500);
+        CurrentAccount      ca1 = new CurrentAccount("Raj", 9_000, 2_000);
+        FixedDepositAccount fd1 = new FixedDepositAccount("Anita", 25_000);
+        SavingsAccount      sa2 = new SavingsAccount("Karan", 2_000, 200);
+
+        // --- B. Save multiple accounts with saveAll() ---
+        repository.saveAll(sa1, ca1, fd1, sa2);
+        System.out.println("Entities saved via saveAll() : " + repository.size());
+        System.out.println("All 4 entities stored        : " + (repository.size() == 4 ? "PASS" : "FAIL"));
+
+        // --- C. Reflection-based ID lookup ---
+        System.out.println("\nReflection-based ID lookup (inherited @Id):");
+        Account found = repository.findById(ca1.getAccountNumber());
+        System.out.println("Found " + ca1.getAccountNumber() + " (CurrentAccount) : " + found);
+        System.out.println("Inherited @Id resolved correctly: " + (found != null && found.equals(ca1) ? "PASS" : "FAIL"));
+
+        Account missing = repository.findById("AC9999");
+        System.out.println("Lookup nonexistent ID (AC9999)  : " + missing);
+
+        // --- D. findAll() snapshot ---
+        System.out.println("\nAll stored accounts (findAll):");
+        ArrayList<Account> allAccounts = repository.findAll();
+        for (Account a : allAccounts) {
+            System.out.printf("  %-10s %-12s %-22s balance=\u20b9%d%n",
+                    a.getAccountNumber(), a.getOwnerName(),
+                    a.getClass().getSimpleName(), a.getBalance());
+        }
+        allAccounts.clear();
+        boolean snapshotIsolated = repository.size() == 4;
+        System.out.println("findAll() snapshot is independent: " + (snapshotIsolated ? "PASS" : "FAIL"));
+
+        // --- E. Demonstrate delete() on a separate test entity ---
+        SavingsAccount testAccount = new SavingsAccount("Temp", 1_000, 100);
+        repository.save(testAccount);
+        int countBefore = repository.size();
+        boolean deletedFirst = repository.delete(testAccount.getAccountNumber());
+        boolean deletedSecond = repository.delete(testAccount.getAccountNumber());
+        int countAfter = repository.size();
+
+        System.out.println("\nDelete demonstration:");
+        System.out.println("  Delete existing ID  : " + deletedFirst + " (expected: true)");
+        System.out.println("  Delete same ID again: " + deletedSecond + " (expected: false)");
+        System.out.println("  Count decreased     : " + (countBefore - 1 == countAfter ? "PASS" : "FAIL")
+                + " (" + countBefore + " -> " + countAfter + ")");
+
+        // --- F. Bounded generic average() ---
+        System.out.println("\nBounded Generic average():");
+        Integer[] marks = {70, 80, 90, 100};
+        Double[] prices = {10.5, 20.5, 30.5};
+
+        double avgMarks = Repository.average(marks);
+        double avgPrices = Repository.average(prices);
+
+        System.out.printf("  Average marks (Integer[]) : %.2f%n", avgMarks);
+        System.out.printf("  Average prices (Double[])  : %.2f%n", avgPrices);
     }
 }
