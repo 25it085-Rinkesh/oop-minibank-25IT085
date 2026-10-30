@@ -43,6 +43,33 @@ public abstract class Account implements Transactable, InterestBearing, Serializ
     }
 
     /**
+     * Synchronizes the static account counter to at least the provided value.
+     * Ensures newly generated accounts never reuse an account number that has
+     * already been allocated, logged, or persisted.
+     *
+     * @param highestSeen the highest account number observed
+     */
+    public static synchronized void syncAccountCounter(long highestSeen) {
+        if (highestSeen > accountCounter) {
+            accountCounter = highestSeen;
+        }
+    }
+
+    /**
+     * Returns the current static account counter value.
+     */
+    public static synchronized long getAccountCounter() {
+        return accountCounter;
+    }
+
+    /**
+     * Resets the static account counter to a specific value (for testing).
+     */
+    public static synchronized void resetAccountCounter(long value) {
+        accountCounter = value;
+    }
+
+    /**
      * After deserialization, bump the static counter to at least the numeric
      * portion of the restored account number so newly constructed accounts do
      * not collide with already-serialized ones.
