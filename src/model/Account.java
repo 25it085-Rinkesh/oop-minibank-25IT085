@@ -12,7 +12,7 @@ import model.annotation.Id;
 import model.annotation.MaxLength;
 import model.annotation.Positive;
 
-public abstract class Account implements Transactable, InterestBearing, Serializable {
+public abstract class Account implements Transactable, InterestBearing, Serializable, Comparable<Account> {
 
     private static final long serialVersionUID = 1L;
 
@@ -198,6 +198,16 @@ public abstract class Account implements Transactable, InterestBearing, Serializ
                 }
             }
         }
+    }
+
+    /**
+     * Natural ordering: lexicographical by account number.
+     * Balance sorting belongs to the Comparator in AccountStore.
+     */
+    @Override
+    public int compareTo(Account other) {
+        Objects.requireNonNull(other, "cannot compare to a null Account");
+        return this.accountNumber.compareTo(other.accountNumber);
     }
 
     public String getAccountNumber() {

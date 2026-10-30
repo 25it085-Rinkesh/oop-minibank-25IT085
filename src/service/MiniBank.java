@@ -25,6 +25,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Scanner;
 import java.util.concurrent.CountDownLatch;
 import model.TransactionType;
@@ -134,6 +136,7 @@ public class MiniBank {
         demoProducerConsumer();
         demoDeadlockPrevention();
         demoPersistenceAndReporting();
+        demoAccountStore();
     }
 
 
@@ -953,11 +956,129 @@ public class MiniBank {
             String entry = ts + "|" + account.getAccountNumber()
                     + "|" + type + "|" + amount;
             TransactionLog.append(logFile, entry);
-            System.out.println("  [OK] " + desc + " → balance: ₹" + account.getBalance());
+            System.out.println("  [OK] " + desc + " \u2192 balance: \u20b9" + account.getBalance());
         } catch (exception.BankException e) {
             System.out.println("  [FAIL] " + desc + ": " + e.getMessage());
         } catch (java.io.IOException e) {
             System.out.println("  [LOG ERROR] " + desc + ": " + e.getMessage());
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Practical 12 — Collections Framework, Comparable, Comparator, ConcurrentHashMap
+    // -------------------------------------------------------------------------
+
+    private static void demoAccountStore() {
+        System.out.println("\n" + SEP);
+        System.out.println("Collections Framework — AccountStore");
+        System.out.println(SEP);
+
+        // --- A. Create accounts ---
+        SavingsAccount      meera  = new SavingsAccount("Meera",  3_000, 500);
+        CurrentAccount      raj    = new CurrentAccount("Raj",    8_000, 2_000);
+        FixedDepositAccount anita  = new FixedDepositAccount("Anita", 15_000);
+        SavingsAccount      karan  = new SavingsAccount("Karan",  1_500, 200);
+
+        AccountStore store = new AccountStore();
+        store.add(meera);
+        store.add(raj);
+        store.add(anita);
+        store.add(karan);
+
+        // --- B. Basic lookup ---
+        System.out.println("Account count     : " + store.getAll().size());
+        System.out.println("Lookup Meera      : " + store.get(meera.getAccountNumber()));
+        System.out.println("Lookup missing    : " + store.get("AC9999"));
+        System.out.println("All accounts:");
+        for (Account a : store.getAll()) {
+            System.out.printf("  %-10s %-12s %-22s balance=\u20b9%d%n",
+                    a.getAccountNumber(), a.getOwnerName(),
+                    a.getClass().getSimpleName(), a.getBalance());
+        }
+
+        // Duplicate rejection
+        try {
+            store.add(meera);
+            System.out.println("Duplicate add     : FAIL (should have thrown)");
+        } catch (IllegalArgumentException e) {
+            System.out.println("Duplicate rejected : PASS (" + e.getMessage() + ")");
+        }
+
+        // --- C. Comparator — sort by balance ascending ---
+        System.out.println("\nSorted by balance (ascending):");
+        ArrayList<Account> byBalance = store.sortedByBalance();
+        for (Account a : byBalance) {
+            System.out.printf("  \u20b9%-8d  %-10s  %-12s  %s%n",
+                    a.getBalance(), a.getAccountNumber(),
+                    a.getOwnerName(), a.getClass().getSimpleName());
+        }
+
+        // --- D. Comparable — natural ordering by account number ---
+        ArrayList<Account> byNumber = store.getAll();
+        Collections.sort(byNumber);     // uses Account.compareTo()
+        System.out.println("\nNatural order (by account number, Comparable):");
+        for (Account a : byNumber) {
+            System.out.printf("  %-10s  %-12s  balance=\u20b9%d%n",
+                    a.getAccountNumber(), a.getOwnerName(), a.getBalance());
+        }
+
+        // --- E. Transaction history ---
+        store.recordTransaction("DEPOSIT   " + meera.getAccountNumber() + " \u20b93000");
+        store.recordTransaction("DEPOSIT   " + raj.getAccountNumber()   + " \u20b98000");
+        store.recordTransaction("WITHDRAW  " + meera.getAccountNumber() + " \u20b9500");
+        store.recordTransaction("DEPOSIT   " + karan.getAccountNumber() + " \u20b91500");
+
+        ArrayList<String> history = store.getTransactionHistory();
+        System.out.println("\nTransaction history (insertion order):");
+        for (int i = 0; i < history.size(); i++) {
+            System.out.println("  [" + (i + 1) + "] " + history.get(i));
+        }
+
+        // Verify defensive copy
+        history.clear();
+        boolean isolated = store.getTransactionHistory().size() == 4;
+        System.out.println("History copy is independent: " + (isolated ? "PASS" : "FAIL"));
+
+        // --- F. ConcurrentHashMap in TransactionProcessor ---
+        System.out.println("\nConcurrentHashMap registry (TransactionProcessor):");
+        SavingsAccount shared1 = new SavingsAccount("P12-Alpha", 5_000, 0);
+        SavingsAccount shared2 = new SavingsAccount("P12-Beta",  5_000, 0);
+
+        TransactionProcessor proc = new TransactionProcessor();
+        proc.registerAccount(shared1);
+        proc.registerAccount(shared2);
+        System.out.println("Registered accounts: " + proc.getAllAccounts().size());
+
+        // Duplicate rejection
+        try {
+            proc.registerAccount(shared1);
+            System.out.println("Duplicate register: FAIL (should have thrown)");
+        } catch (IllegalStateException e) {
+            System.out.println("Duplicate rejected : PASS (" + e.getMessage() + ")");
+        }
+
+        // Submit 50 deposit tasks to each shared account via the registry
+        final int TASKS = 50;
+        final long AMT  = 10L;
+        for (int i = 0; i < TASKS; i++) {
+            String num = shared1.getAccountNumber();
+            proc.submit(new AccountTransactionTask(
+                    proc.getAccount(num), TransactionType.DEPOSIT, AMT));
+        }
+        for (int i = 0; i < TASKS; i++) {
+            String num = shared2.getAccountNumber();
+            proc.submit(new AccountTransactionTask(
+                    proc.getAccount(num), TransactionType.DEPOSIT, AMT));
+        }
+        proc.stop();
+
+        long exp1 = 5_000 + TASKS * AMT;
+        long exp2 = 5_000 + TASKS * AMT;
+        System.out.printf("P12-Alpha balance: expected=\u20b9%d actual=\u20b9%d %s%n",
+                exp1, shared1.getBalance(), shared1.getBalance() == exp1 ? "PASS" : "FAIL");
+        System.out.printf("P12-Beta  balance: expected=\u20b9%d actual=\u20b9%d %s%n",
+                exp2, shared2.getBalance(), shared2.getBalance() == exp2 ? "PASS" : "FAIL");
+        System.out.println("Registry size     : " + proc.getAllAccounts().size()
+                + " unique accounts");
     }
 }
