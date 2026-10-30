@@ -4,12 +4,18 @@ import exception.AccountNotFoundException;
 import exception.BankException;
 import exception.InsufficientFundsException;
 import exception.InvalidAmountException;
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.Serializable;
 import java.util.Objects;
 import model.annotation.Id;
 import model.annotation.MaxLength;
 import model.annotation.Positive;
 
-public abstract class Account implements Transactable, InterestBearing {
+public abstract class Account implements Transactable, InterestBearing, Serializable {
+
+    private static final long serialVersionUID = 1L;
+
     private static long accountCounter = 0;
 
     @Id
@@ -31,9 +37,32 @@ public abstract class Account implements Transactable, InterestBearing {
         this(ownerName, 0);
     }
 
-    private static String generateAccountNumber() {
+    private static synchronized String generateAccountNumber() {
         accountCounter++;
         return String.format("AC%04d", accountCounter);
+    }
+
+    /**
+     * After deserialization, bump the static counter to at least the numeric
+     * portion of the restored account number so newly constructed accounts do
+     * not collide with already-serialized ones.
+     */
+    private void readObject(ObjectInputStream in)
+            throws IOException, ClassNotFoundException {
+        in.defaultReadObject();
+        // accountNumber has the form "AC0042"; parse the trailing digits.
+        if (accountNumber != null && accountNumber.startsWith("AC")) {
+            try {
+                long restored = Long.parseLong(accountNumber.substring(2));
+                synchronized (Account.class) {
+                    if (restored > accountCounter) {
+                        accountCounter = restored;
+                    }
+                }
+            } catch (NumberFormatException ignored) {
+                // Non-standard account number — leave counter unchanged.
+            }
+        }
     }
 
     @Override

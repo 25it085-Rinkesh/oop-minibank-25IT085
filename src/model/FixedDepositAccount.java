@@ -1,6 +1,10 @@
 package model;
 
-public class FixedDepositAccount extends Account {
+import java.io.Serializable;
+
+public class FixedDepositAccount extends Account implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     public FixedDepositAccount(String ownerName, long openingBalance) {
         super(ownerName, openingBalance);

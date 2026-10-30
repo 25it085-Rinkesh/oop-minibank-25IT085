@@ -20,9 +20,17 @@ import util.AnnotationValidator;
 
 import java.lang.management.ManagementFactory;
 import java.lang.management.ThreadMXBean;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.LocalDate;
 import java.util.Scanner;
 import java.util.concurrent.CountDownLatch;
 import model.TransactionType;
+import util.ReportGenerator;
+import util.StatePersister;
+import util.TransactionLog;
 
 import static util.Validator.isValidMobile;
 
@@ -125,6 +133,7 @@ public class MiniBank {
         demoTransactionProcessor();
         demoProducerConsumer();
         demoDeadlockPrevention();
+        demoPersistenceAndReporting();
     }
 
 
@@ -830,5 +839,125 @@ public class MiniBank {
         System.out.println("Combined balance preserved             : " + (sumPreserved ? "PASS (₹" + combinedAfter + ")" : "FAIL (₹" + combinedAfter + ")"));
         System.out.println("No unexpected transfer exception       : " + (!transferError[0] ? "PASS" : "FAIL"));
         System.out.println("Deadlock prevention result            : " + (bothFinished && sumPreserved && !transferError[0] ? "PASS" : "FAIL"));
+    }
+
+    // -------------------------------------------------------------------------
+    // Practical 11 — Serialization, Persistence, Transaction Logging, NIO
+    // -------------------------------------------------------------------------
+
+    private static void demoPersistenceAndReporting() {
+        System.out.println("\n" + SEP);
+        System.out.println("Serialization & File Persistence");
+        System.out.println(SEP);
+
+        Path dataDir    = Paths.get("data");
+        Path accountFile = dataDir.resolve("accounts.dat");
+        Path logsDir    = dataDir.resolve("logs");
+        Path reportFile = dataDir.resolve("reports").resolve("end-of-day-report.txt");
+        String today    = LocalDate.now().toString();          // e.g. 2026-10-30
+        Path logFile    = logsDir.resolve("transactions-" + today + ".log");
+
+        // --- A. Prepare accounts ---
+        SavingsAccount      s1 = new SavingsAccount("Meera",  8_000, 500);
+        CurrentAccount      c1 = new CurrentAccount("Raj",    5_000, 2_000);
+        FixedDepositAccount fd1 = new FixedDepositAccount("Anita", 20_000);
+        Account[] accounts = { s1, c1, fd1 };
+
+        // --- B. Save ---
+        try {
+            StatePersister.save(accounts, accountFile);
+            System.out.println("Saved " + accounts.length + " accounts to " + accountFile);
+        } catch (Exception e) {
+            System.out.println("Save failed: " + e.getMessage());
+            return;
+        }
+
+        // --- C. Load and verify ---
+        Account[] loaded;
+        try {
+            loaded = StatePersister.load(accountFile);
+        } catch (Exception e) {
+            System.out.println("Load failed: " + e.getMessage());
+            return;
+        }
+        System.out.println("Loaded " + loaded.length + " accounts:");
+        for (Account a : loaded) {
+            System.out.println("  " + a + " [" + a.getClass().getSimpleName() + "]");
+        }
+
+        // Verify subclass-specific data survives the round-trip
+        boolean savingsOk = (loaded[0] instanceof SavingsAccount sa)
+                && sa.getMinBalance() == s1.getMinBalance();
+        boolean currentOk = (loaded[1] instanceof CurrentAccount ca)
+                && ca.getOverdraftLimit() == c1.getOverdraftLimit();
+        boolean fdOk      = loaded[2] instanceof FixedDepositAccount;
+        System.out.println("SavingsAccount  minBalance preserved  : " + (savingsOk ? "PASS" : "FAIL"));
+        System.out.println("CurrentAccount  overdraftLimit preserved: " + (currentOk ? "PASS" : "FAIL"));
+        System.out.println("FixedDepositAccount type preserved     : " + (fdOk      ? "PASS" : "FAIL"));
+
+        // --- D. Transaction logging ---
+        System.out.println("\n" + SEP);
+        System.out.println("Append-only Transaction Log");
+        System.out.println(SEP);
+
+        // Perform and log several transactions against the loaded accounts
+        logTxn(loaded[0], true,  1_000, logFile, "deposit 1000 to Meera");
+        logTxn(loaded[0], true,    500, logFile, "deposit 500  to Meera");
+        logTxn(loaded[0], false,   200, logFile, "withdraw 200 from Meera");
+        logTxn(loaded[1], true,  2_000, logFile, "deposit 2000 to Raj");
+        logTxn(loaded[1], false,   750, logFile, "withdraw 750 from Raj");
+        logTxn(loaded[2], true,  3_000, logFile, "deposit 3000 to Anita");
+
+        // Count entries actually written
+        long lineCount = 0;
+        try {
+            lineCount = Files.lines(logFile, StandardCharsets.UTF_8).count();
+        } catch (Exception e) {
+            System.out.println("Could not count log lines: " + e.getMessage());
+        }
+        System.out.println("Log file        : " + logFile);
+        System.out.println("Entries written : " + lineCount + " (append-only, never truncated)");
+
+        // --- E. Generate and display report ---
+        System.out.println("\n" + SEP);
+        System.out.println("NIO End-of-Day Report");
+        System.out.println(SEP);
+
+        try {
+            ReportGenerator.generate(logsDir, reportFile);
+            System.out.println("Report generated: " + reportFile);
+            System.out.println();
+            System.out.println(Files.readString(reportFile, StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            System.out.println("Report generation failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Executes a deposit or withdrawal against {@code account}, then appends
+     * one record to {@code logFile} only when the transaction succeeds.
+     */
+    private static void logTxn(Account account, boolean deposit,
+                                long amount, Path logFile, String desc) {
+        String type = deposit ? "DEPOSIT" : "WITHDRAW";
+        try {
+            if (deposit) {
+                account.deposit(amount);
+            } else {
+                account.withdraw(amount);
+            }
+            // ISO-8601 UTC timestamp, truncated to seconds
+            String ts = java.time.Instant.now()
+                    .truncatedTo(java.time.temporal.ChronoUnit.SECONDS)
+                    .toString();
+            String entry = ts + "|" + account.getAccountNumber()
+                    + "|" + type + "|" + amount;
+            TransactionLog.append(logFile, entry);
+            System.out.println("  [OK] " + desc + " → balance: ₹" + account.getBalance());
+        } catch (exception.BankException e) {
+            System.out.println("  [FAIL] " + desc + ": " + e.getMessage());
+        } catch (java.io.IOException e) {
+            System.out.println("  [LOG ERROR] " + desc + ": " + e.getMessage());
+        }
     }
 }
